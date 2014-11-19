@@ -1,3 +1,4 @@
+package constraints;
 /*++
  Copyright (c) 2012 Microsoft Corporation
 
@@ -804,7 +805,7 @@ class JavaExample
 
     void BasicTests(Context ctx) throws Z3Exception, TestFailedException
     {
-        System.out.println("BasicTests");
+        System.out.println("f");
 
         Symbol fname = ctx.MkSymbol("f");
         Symbol x = ctx.MkSymbol("x");
