@@ -6,9 +6,11 @@ import java.util.Set;
 import accrue.pdg.PDGEdge;
 import accrue.pdg.ProgramDependenceGraph;
 import accrue.pdg.node.AbstractPDGNode;
+import accrue.pdg.node.PDGNodeType;
 
 import com.microsoft.z3.BoolExpr;
 import com.microsoft.z3.Context;
+import com.microsoft.z3.Expr;
 import com.microsoft.z3.Z3Exception;
 
 public class ExpressionConstraints {
@@ -34,37 +36,67 @@ public class ExpressionConstraints {
 	}
 
 	// searches for node with name "name" amongst the parents of this node in the z3var map
-	public static BoolExpr getZ3VarFromSources(String name, AbstractPDGNode node, ProgramDependenceGraph pdg, 
-									Map<Integer,BoolExpr> pdgNodeToZ3Var, Context ctx) throws Z3Exception {
+	public static Expr getZ3VarFromSources(String name, AbstractPDGNode node, ProgramDependenceGraph pdg, 
+									Map<Integer,Expr> expNodeToZ3Var, Context ctx) throws Z3Exception {
+
 		Set<PDGEdge> edges = pdg.incomingEdgesOf(node); 
 		for (PDGEdge edge : edges) {
 			AbstractPDGNode source = edge.getSource();
 			String sourceName = getVarName(source.getName());
 			if (name.equals(sourceName)) {
-				return IntraProcedureConstraints.getOrAddVar(pdgNodeToZ3Var, source.getNodeId(), ctx);
+				Expr added =  IntraProcedureConstraints.getOrAddAnyVar(expNodeToZ3Var, source.getNodeId(), ctx);
+				return added;
 			}
 		}
 		// this should never happen
 		return Z3Addons.getFreshBoolVar(ctx);
 	}
 	
+	public static BoolExpr getPhiExp(String name, AbstractPDGNode node, ProgramDependenceGraph pdg,
+			Map<Integer, Expr> expNodeToZ3Var, Context ctx) throws Z3Exception {
+		Expr nodeVar = IntraProcedureConstraints.getOrAddAnyVar(expNodeToZ3Var, node.getNodeId(), ctx);
+		if (name.indexOf("phi") != -1) {
+			int start = name.indexOf("(");
+			int endfirst = name.indexOf(",");
+			int end = name.indexOf(")");
+			String leftName = name.substring(start + 1, endfirst);
+			String rightName = name.substring(endfirst + 1, end);
+			Expr leftVar = getZ3VarFromSources(leftName, node, pdg, expNodeToZ3Var, ctx);
+			Expr rightVar = getZ3VarFromSources(rightName, node, pdg, expNodeToZ3Var, ctx);
+			return ctx.MkOr(new BoolExpr[] {ctx.MkEq(nodeVar, leftVar), ctx.MkEq(nodeVar, rightVar)});
+		}
+		return null;
+	}
+	
+	public static BoolExpr getUnaryExp(String name, AbstractPDGNode node, ProgramDependenceGraph pdg,
+								Map<Integer, Expr> expNodeToZ3Var, Context ctx) throws Z3Exception {
+		Expr nodeVar = IntraProcedureConstraints.getOrAddAnyVar(expNodeToZ3Var, node.getNodeId(), ctx);
+		Expr rhs = getZ3VarFromSources(name, node, pdg, expNodeToZ3Var, ctx);
+		return ctx.MkEq(nodeVar, rhs);
+	}
+							
 	public static BoolExpr getExpConstraint(AbstractPDGNode node, ProgramDependenceGraph pdg, 
-											Map<Integer, BoolExpr> pdgNodeToZ3Var, Context ctx) 
+											Map<Integer, Expr> expNodeToZ3Var, Context ctx) 
 															throws Z3Exception {
+		Expr nodeVar = IntraProcedureConstraints.getOrAddAnyVar(expNodeToZ3Var, node.getNodeId(), ctx);
 		String name = node.getName();
-		// deal with LOCAL nodes first
+		
+		if (node.getNodeType() == PDGNodeType.BASE_VALUE) {
+			return ctx.MkEq(nodeVar, getConst(name, ctx));
+		}
+		
 		if (name.indexOf("=") != -1) {
 			name = name.substring(name.indexOf("=") + 2);
 		}
-		
-		// < case
-		// > case
-		// ! case
-		// phi case
-		
+		else {
+			// < case
+			// > case
+			// ! case
+			// phi case
+			BoolExpr phiExp = getPhiExp(name, node, pdg, expNodeToZ3Var, ctx);
+			if (phiExp != null) return phiExp;
+		}
 		// unary case
-		BoolExpr constExpr = getConst(name, ctx);
-		if (constExpr != null) return constExpr;
-		return getZ3VarFromSources(name, node, pdg, pdgNodeToZ3Var, ctx);
+		return getUnaryExp(name, node, pdg, expNodeToZ3Var, ctx);
 	}
 }

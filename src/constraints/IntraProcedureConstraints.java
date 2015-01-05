@@ -18,20 +18,33 @@ import accrue.pdg.node.PDGNodeType;
 
 import com.microsoft.z3.BoolExpr;
 import com.microsoft.z3.Context;
+import com.microsoft.z3.Expr;
 import com.microsoft.z3.Model;
 import com.microsoft.z3.Z3Exception;
 
 public class IntraProcedureConstraints {
-	
-	public static BoolExpr getOrAddVar(Map<Integer, BoolExpr> pdgNodeToZ3Var, int id, Context ctx) 
-				throws Z3Exception {
-		BoolExpr nodeVar = null;
-		if (pdgNodeToZ3Var.containsKey(id)) {
-			nodeVar = pdgNodeToZ3Var.get(id);
+	public static Expr getOrAddAnyVar(Map<Integer, Expr> mapToZ3Var, int id, Context ctx) 
+			throws Z3Exception {
+		Expr nodeVar = null;
+		if (mapToZ3Var.containsKey(id)) {
+			nodeVar = mapToZ3Var.get(id);
 		}
 		else {
 			nodeVar = Z3Addons.getFreshBoolVar(ctx);
-			pdgNodeToZ3Var.put(id, nodeVar);
+			mapToZ3Var.put(id, nodeVar);
+		}
+		return nodeVar;
+	}	
+	
+	public static BoolExpr getOrAddVar(Map<Integer, BoolExpr> mapToZ3Var, int id, Context ctx) 
+				throws Z3Exception {
+		BoolExpr nodeVar = null;
+		if (mapToZ3Var.containsKey(id)) {
+			nodeVar = mapToZ3Var.get(id);
+		}
+		else {
+			nodeVar = Z3Addons.getFreshBoolVar(ctx);
+			mapToZ3Var.put(id, nodeVar);
 		}
 		return nodeVar;
 	}
@@ -40,6 +53,7 @@ public class IntraProcedureConstraints {
 	public static boolean isExprNode(AbstractPDGNode node) {
 		switch (node.getNodeType()) {
 			case LOCAL:
+			case BASE_VALUE:
 			case OTHER_EXPRESSION:
 				return true;
 			default:
@@ -66,6 +80,100 @@ public class IntraProcedureConstraints {
 		}
 		return null;
 	}
+
+	public static BoolExpr getMergeControlFlowConstraints(List<PDGEdge> edgeList, ProgramDependenceGraph pdg, 
+					Context ctx, Map<Integer, BoolExpr> pdgNodeToZ3Var) throws Z3Exception {
+		BoolExpr pcConstraint = null;
+
+		AbstractPDGNode mergeNode = getSourceNodeByType(edgeList,PDGEdgeType.MERGE);
+		if (mergeNode != null) {
+			mergeNode = edgeList.get(0).getSource();
+			pcConstraint = getOrAddVar(pdgNodeToZ3Var, mergeNode.getNodeId(), ctx);
+			for (int i = 1; i < edgeList.size(); i++) {
+				assert(edgeList.get(i).getType() == PDGEdgeType.MERGE);
+				mergeNode = edgeList.get(i).getSource();
+				BoolExpr newConstraint = getOrAddVar(pdgNodeToZ3Var, mergeNode.getNodeId(), ctx);
+				pcConstraint = ctx.MkOr(new BoolExpr[] {pcConstraint, newConstraint});
+			}
+		}
+		
+		return pcConstraint;
+	}
+	
+	public static BoolExpr getTrueControlFlowConstraints(List<PDGEdge> edgeList, ProgramDependenceGraph pdg, 
+			Context ctx, Map<Integer, BoolExpr> pdgNodeToZ3Var) throws Z3Exception {		
+		AbstractPDGNode trueNode = getSourceNodeByType(edgeList,PDGEdgeType.TRUE);
+		if (trueNode != null) {
+			return getOrAddVar(pdgNodeToZ3Var, trueNode.getNodeId(), ctx);
+		}
+		return null;
+	}
+	
+	public static BoolExpr getFalseControlFlowConstraints(List<PDGEdge> edgeList, ProgramDependenceGraph pdg, 
+			Context ctx, Map<Integer, BoolExpr> pdgNodeToZ3Var) throws Z3Exception {		
+		AbstractPDGNode falseNode = getSourceNodeByType(edgeList,PDGEdgeType.FALSE);
+		if (falseNode != null) {
+			return getOrAddVar(pdgNodeToZ3Var, falseNode.getNodeId(), ctx);
+		}
+		return null;
+	}	
+	
+	public static BoolExpr getCopyExplicitControlFlowConstraints(List<PDGEdge> edgeList, ProgramDependenceGraph pdg, 
+			Context ctx, Map<Integer, BoolExpr> pdgNodeToZ3Var) throws Z3Exception {		
+		BoolExpr pcConstraint = null;
+		
+		AbstractPDGNode copyExplicitNode = getSourceNodeByType(edgeList,PDGEdgeType.COPY);
+		if (copyExplicitNode == null) getSourceNodeByType(edgeList,PDGEdgeType.EXP);
+		if (copyExplicitNode != null) {
+			for (PDGEdge edge : edgeList) {
+				if ((edge.getType() == PDGEdgeType.COPY) || (edge.getType() == PDGEdgeType.EXP)) {
+					copyExplicitNode = edge.getSource();
+					BoolExpr newConstraint = getOrAddVar(pdgNodeToZ3Var, copyExplicitNode.getNodeId(), ctx);
+					pcConstraint = addConstraints(pcConstraint, ctx, newConstraint);
+				}
+			}
+		}
+		
+		return pcConstraint;
+	}
+	
+	public static BoolExpr getImplicitControlFlowConstraints(List<PDGEdge> edgeList, ProgramDependenceGraph pdg, 
+			Context ctx, Map<Integer, BoolExpr> pdgNodeToZ3Var) throws Z3Exception {		
+		AbstractPDGNode implicitNode = getSourceNodeByType(edgeList,PDGEdgeType.IMPLICIT);
+		if (implicitNode != null) {
+			return getOrAddVar(pdgNodeToZ3Var, implicitNode.getNodeId(), ctx);
+		}
+		return null;
+	}
+
+	public static BoolExpr getConjunctionControlFlowConstraints(List<PDGEdge> edgeList, ProgramDependenceGraph pdg, 
+			Context ctx, Map<Integer, BoolExpr> pdgNodeToZ3Var) throws Z3Exception {		
+		BoolExpr pcConstraint = null;
+		
+		AbstractPDGNode conjunctionNode = getSourceNodeByType(edgeList, PDGEdgeType.CONJUNCTION);
+		if (conjunctionNode != null) {
+			for (PDGEdge edge : edgeList) {
+				AbstractPDGNode source = edge.getSource();
+				if (edge.getType() == PDGEdgeType.CONJUNCTION) {
+					BoolExpr newVar = getOrAddVar(pdgNodeToZ3Var, source.getNodeId(), ctx);
+					pcConstraint = addConstraints(pcConstraint, ctx, newVar);
+				}
+			}
+		}
+		
+		return pcConstraint;
+	}
+	
+	public static BoolExpr addConstraints(BoolExpr pcConstraint, Context ctx, BoolExpr addConstraint) 
+														throws Z3Exception {
+		if (pcConstraint != null) {
+			if (addConstraint != null) {
+				return ctx.MkAnd(new BoolExpr[] {pcConstraint, addConstraint});
+			}
+			return pcConstraint;
+		}
+		return addConstraint;
+	}
 	
 	/**
 	 * XXX
@@ -79,8 +187,8 @@ public class IntraProcedureConstraints {
 	 */
 	public static void getControlFlowConstraints(AbstractPDGNode node, ProgramDependenceGraph pdg, 
 													Context ctx, Map<Integer, BoolExpr> pdgNodeToZ3Var,
-													Set<BoolExpr> newConstraints) 
-													throws Z3Exception {		
+													Set<BoolExpr> constraints) 
+													throws Z3Exception {
 		Set<PDGEdge> edges = pdg.incomingEdgesOf(node);
 		if (edges.isEmpty()) return;
 		
@@ -88,96 +196,90 @@ public class IntraProcedureConstraints {
 		BoolExpr pcConstraint = null;
 		
 		// merge type
-		AbstractPDGNode mergeNode = getSourceNodeByType(edgeList,PDGEdgeType.MERGE);
-		if (mergeNode != null) {
-			mergeNode = edgeList.get(0).getSource();
-			pcConstraint = getOrAddVar(pdgNodeToZ3Var, mergeNode.getNodeId(), ctx);
-			for (int i = 1; i < edgeList.size(); i++) {
-				assert(edgeList.get(i).getType() == PDGEdgeType.MERGE);
-				mergeNode = edgeList.get(i).getSource();
-				BoolExpr newConstraint = getOrAddVar(pdgNodeToZ3Var, mergeNode.getNodeId(), ctx);
-				pcConstraint = ctx.MkOr(new BoolExpr[] {pcConstraint, newConstraint});
-			}
-		}
+		pcConstraint = addConstraints(pcConstraint, ctx,
+				getMergeControlFlowConstraints(edgeList, pdg, ctx, pdgNodeToZ3Var));
 		
+		// true type
+		pcConstraint = addConstraints(pcConstraint, ctx,
+				getTrueControlFlowConstraints(edgeList, pdg, ctx, pdgNodeToZ3Var));
+
+		// false type
+		pcConstraint = addConstraints(pcConstraint, ctx,
+				getFalseControlFlowConstraints(edgeList, pdg, ctx, pdgNodeToZ3Var));
+	
+		// copy and explicit type
+		pcConstraint = addConstraints(pcConstraint, ctx,
+				getCopyExplicitControlFlowConstraints(edgeList, pdg, ctx, pdgNodeToZ3Var));
+		
+		// implicit type
+		pcConstraint = addConstraints(pcConstraint, ctx,
+				getImplicitControlFlowConstraints(edgeList, pdg, ctx, pdgNodeToZ3Var));
+
+		// conjunction type
+		pcConstraint = addConstraints(pcConstraint, ctx,
+				getConjunctionControlFlowConstraints(edgeList, pdg, ctx, pdgNodeToZ3Var));
+
+		BoolExpr nodeVar = getOrAddVar(pdgNodeToZ3Var, node.getNodeId(), ctx);
+		if (pcConstraint != null)
+			constraints.add(ctx.MkEq(nodeVar, pcConstraint));
+	}
+	
+	public static BoolExpr getTrueFalseCondition(AbstractPDGNode node, 
+												ProgramDependenceGraph pdg, Context ctx,
+												Map<Integer, Expr> expNodeToZ3Var) throws Z3Exception{
+		Set<PDGEdge> edges = pdg.incomingEdgesOf(node);
+		List<PDGEdge> edgeList = new ArrayList<PDGEdge>(edges);
 		// true type
 		AbstractPDGNode trueNode = getSourceNodeByType(edgeList,PDGEdgeType.TRUE);
 		if (trueNode != null) {
-			BoolExpr nodeVar = getOrAddVar(pdgNodeToZ3Var, trueNode.getNodeId(), ctx);
-			BoolExpr nodeConstraint = ExpressionConstraints.getExpConstraint(trueNode, pdg, pdgNodeToZ3Var, ctx);
-			constraints.add(ctx.MkEq(nodeVar, nodeConstraint));
-			pcConstraint = nodeVar;
+			BoolExpr trueNodeVar = (BoolExpr) getOrAddAnyVar(expNodeToZ3Var, trueNode.getNodeId(), ctx);
+			return trueNodeVar;
 		}
 		
 		// false type
 		AbstractPDGNode falseNode = getSourceNodeByType(edgeList,PDGEdgeType.FALSE);
 		if (falseNode != null) {
-			BoolExpr nodeVar = getOrAddVar(pdgNodeToZ3Var, falseNode.getNodeId(), ctx);
-			BoolExpr nodeConstraint = ExpressionConstraints.getExpConstraint(falseNode, pdg, pdgNodeToZ3Var, ctx);
-			constraints.add(ctx.MkEq(nodeVar, nodeConstraint));
-			pcConstraint = ctx.MkNot(nodeVar);
-		}
+			BoolExpr falseNodeVar = (BoolExpr) getOrAddAnyVar(expNodeToZ3Var, falseNode.getNodeId(), ctx);
+			return ctx.MkNot(falseNodeVar);
+		}	
 		
-		// implicit type
-		AbstractPDGNode implicitNode = getSourceNodeByType(edgeList,PDGEdgeType.IMPLICIT);
-		if (implicitNode != null) {
-			pcConstraint = getOrAddVar(pdgNodeToZ3Var, implicitNode.getNodeId(), ctx);
-		}
-		
-		// conjunction type
-		AbstractPDGNode conjunctionNode = getSourceNodeByType(edgeList, PDGEdgeType.CONJUNCTION);
-		if (conjunctionNode != null) {
-			AbstractPDGNode addedNode = null;
-			if (pcConstraint == null) {
-				pcConstraint = getOrAddVar(pdgNodeToZ3Var, conjunctionNode.getNodeId(), ctx);
-				addedNode = conjunctionNode;
-			}
-			for (PDGEdge edge : edgeList) {
-				AbstractPDGNode source = edge.getSource();
-				if ((edge.getType() == PDGEdgeType.CONJUNCTION) && (!source.equals(addedNode))) {
-					BoolExpr newVar = getOrAddVar(pdgNodeToZ3Var, source.getNodeId(), ctx);
-					pcConstraint = ctx.MkAnd(new BoolExpr[] {newVar, pcConstraint});
-				}
-			}
-		}
-		constraints.add(pcConstraint);
-		
-		return;
+		return null;
 	}
 	
-	public static Deque<Integer> getPredecessors(AbstractPDGNode node, 
-								ProgramDependenceGraph pdg, Set<Integer> visited) {
-		Deque<Integer> workQueue = new ArrayDeque<>();
-		if (isPCNode(node)) {
-			for (PDGEdge edge : pdg.incomingEdgesOf(node)) {
-				int sourceId = edge.getSource().getNodeId();
-				// bool_true_pc shouldn't add the parent vertex to the traversal
-				if (isPCNode(edge.getSource()) && visited.add(sourceId)) {
-					workQueue.add(sourceId);
-				}
+	public static void getExpressionConstraints(AbstractPDGNode node, 
+									ProgramDependenceGraph pdg, Context ctx, 
+									Map<Integer, BoolExpr> pdgNodeToZ3Var, 
+									Map<Integer, Expr> expNodeToZ3Var, 
+									Set<BoolExpr> constraints) throws Z3Exception {
+		BoolExpr expConstraint = null;
+		
+		BoolExpr trueFalseCondition = getTrueFalseCondition(node, pdg, ctx, expNodeToZ3Var);
+		if (trueFalseCondition != null) expConstraint = trueFalseCondition;
+		
+		if (isExprNode(node)) {
+			// expression constraint should be something like this val constraint = 
+			// some combination of parent's val constraints.
+			BoolExpr nodeConstraint = ExpressionConstraints.getExpConstraint(node, pdg, expNodeToZ3Var, ctx);
+			if (nodeConstraint != null) {
+				expConstraint = nodeConstraint;
+				System.out.println("Node constraint for " + node.getName() + " " + expConstraint);
 			}
-			return workQueue;
 		}
 		
-		// only add the PC node if there is a PC node
-		for (PDGEdge edge : pdg.incomingEdgesOf(node)) {
-			AbstractPDGNode source = edge.getSource();
-			int sourceId = source.getNodeId();
-			if (isPCNode(source)) {
-				if (visited.add(sourceId)) {
-					workQueue.add(sourceId);
-				}
-				return workQueue;
-			}
-		}
-		// add all nodes otherwise
+		BoolExpr nodeVar = getOrAddVar(pdgNodeToZ3Var, node.getNodeId(), ctx);
+		if (expConstraint != null)
+			constraints.add(ctx.MkImplies(nodeVar, expConstraint));
+	}
+	
+	public static void getPredecessors(AbstractPDGNode node, 
+								ProgramDependenceGraph pdg, Set<Integer> visited, 
+								Deque<Integer> workQueue) {
 		for (PDGEdge edge : pdg.incomingEdgesOf(node)) {
 			int sourceId = edge.getSource().getNodeId();
 			if (visited.add(sourceId)) {
 				workQueue.add(sourceId);
 			}
 		}
-		return workQueue;
 	}
 	
 	public static Set<BoolExpr> getIntraProcedureConstraints(int nodeID, ProgramDependenceGraph pdg, 
@@ -186,7 +288,7 @@ public class IntraProcedureConstraints {
 		Set<Integer> visited = new HashSet<>();
 		Set<BoolExpr> constraints = new LinkedHashSet<>();
 		Map<Integer, BoolExpr> pdgNodeToZ3Var = new HashMap<>();
-		Map<Integer, BoolExpr> expNodeToZ3Var = new HashMap<>();
+		Map<Integer, Expr> expNodeToZ3Var = new HashMap<>();
 		
 		BoolExpr base = Z3Addons.getFreshBoolVar(ctx);
 		workQueue.add(nodeID);
@@ -204,21 +306,11 @@ public class IntraProcedureConstraints {
 				continue;
 			}
 			
-			Set<BoolExpr> newConstraints = new HashSet<BoolExpr>();
-			getControlFlowConstraints(node, pdg, ctx, pdgNodeToZ3Var, newConstraints);
-			constraints.addAll(newConstraints);
-			
-			if (isExprNode(node)) {
-				// pretty sure you're never adding a new var here, check ltr
-				BoolExpr nodeVar = getOrAddVar(pdgNodeToZ3Var, nextID, ctx);
-				BoolExpr nodeConstraint = ExpressionConstraints.getExpConstraint(node, pdg, pdgNodeToZ3Var, ctx);
-				constraints.add(ctx.MkEq(nodeVar, nodeConstraint));
-			}
+			getControlFlowConstraints(node, pdg, ctx, pdgNodeToZ3Var, constraints);
+			getExpressionConstraints(node, pdg, ctx, pdgNodeToZ3Var, expNodeToZ3Var, constraints);
 			
 			// add predecessors that we care about to the work queue
-			Deque<Integer> nextQueue = getPredecessors(node, pdg, visited);
-			workQueue.addAll(nextQueue);
-			
+			getPredecessors(node, pdg, visited, workQueue);
 		}
 		
 		return constraints; 
@@ -239,14 +331,18 @@ public class IntraProcedureConstraints {
 	
 	public static void main(String[] args) throws Z3Exception {
 		String filename = "/Users/ramyarangan/Dropbox/Research/PLResearch/eclipseworkspace/accrue-bytecode/tests";
-		filename += "/pdg_test.instruction.Unseen.json.gz";
+//		 filename += "/pdg_test.instruction.UnseenAnd.json.gz";
+		filename += "/pdg_test.pointer.CallTwice.json.gz";
 		ProgramDependenceGraph pdg = PDGFactory.graphFromJSONFile(filename, false);
-		//printGraphInfo(pdg);
-		Context ctx = new Context();
-		Set<BoolExpr> constraints = getIntraProcedureConstraints(36, pdg, ctx);
-		printConstraints(constraints);
-		System.out.println();
-		Model model = ConstraintCheck.Check(ctx, constraints);
-		System.out.println(model);
+		// test: Unseen/ Seen: 36
+		// 		 Phi1: 35
+		//  	UnseenAnd/ SeenAnd : 43
+		printGraphInfo(pdg);
+//		Context ctx = new Context();
+//		Set<BoolExpr> constraints = getIntraProcedureConstraints(43, pdg, ctx);
+//		printConstraints(constraints);
+//		System.out.println();
+//		Model model = ConstraintCheck.Check(ctx, constraints);
+//		System.out.println(model);
 	}
 }
