@@ -1,5 +1,7 @@
 package constraints;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -44,17 +46,42 @@ public class ExpressionConstraints {
 			AbstractPDGNode source = edge.getSource();
 			String sourceName = getVarName(source.getName());
 			if (name.equals(sourceName)) {
-				Expr added =  IntraProcedureConstraints.getOrAddAnyVar(expNodeToZ3Var, source.getNodeId(), ctx);
-				return added;
+				return InterProcedureConstraints.getOrAddAnyVar(expNodeToZ3Var, source.getNodeId(), ctx);
 			}
 		}
-		// this should never happen
-		return Z3Addons.getFreshBoolVar(ctx);
+
+		return null;
+	}
+	
+	/**
+	 * multiple values can equal a return node value, say. 
+	 * 
+	 * @param node
+	 * @param pdg
+	 * @param expNodeToZ3Var
+	 * @param ctx
+	 * @return
+	 * @throws Z3Exception
+	 */
+	public static List<Expr> getExpSourceNode(AbstractPDGNode node, 
+										ProgramDependenceGraph pdg, 
+										Map<Integer, Expr> expNodeToZ3Var, 
+										Context ctx) throws Z3Exception {
+		List<Expr> constraints = new ArrayList<Expr>();
+		
+		for (PDGEdge edge : pdg.incomingEdgesOf(node)) {
+			AbstractPDGNode source = edge.getSource();
+			if (InterProcedureConstraints.isExprNode(source)) {
+				Expr newVar = InterProcedureConstraints.getOrAddAnyVar(expNodeToZ3Var, source.getNodeId(), ctx);
+				constraints.add(newVar);
+			}
+		}
+		return constraints;
 	}
 	
 	public static BoolExpr getPhiExp(String name, AbstractPDGNode node, ProgramDependenceGraph pdg,
 			Map<Integer, Expr> expNodeToZ3Var, Context ctx) throws Z3Exception {
-		Expr nodeVar = IntraProcedureConstraints.getOrAddAnyVar(expNodeToZ3Var, node.getNodeId(), ctx);
+		Expr nodeVar = InterProcedureConstraints.getOrAddAnyVar(expNodeToZ3Var, node.getNodeId(), ctx);
 		if (name.indexOf("phi") != -1) {
 			int start = name.indexOf("(");
 			int endfirst = name.indexOf(",");
@@ -70,18 +97,32 @@ public class ExpressionConstraints {
 	
 	public static BoolExpr getUnaryExp(String name, AbstractPDGNode node, ProgramDependenceGraph pdg,
 								Map<Integer, Expr> expNodeToZ3Var, Context ctx) throws Z3Exception {
-		Expr nodeVar = IntraProcedureConstraints.getOrAddAnyVar(expNodeToZ3Var, node.getNodeId(), ctx);
-		Expr rhs = getZ3VarFromSources(name, node, pdg, expNodeToZ3Var, ctx);
-		return ctx.MkEq(nodeVar, rhs);
+		Expr nodeVar = InterProcedureConstraints.getOrAddAnyVar(expNodeToZ3Var, node.getNodeId(), ctx);
+		List<Expr> subExps = new ArrayList<Expr>();
+		Expr potentialSubExp = getZ3VarFromSources(name, node, pdg, expNodeToZ3Var, ctx);
+		if (potentialSubExp == null)
+			subExps = getExpSourceNode(node, pdg, expNodeToZ3Var, ctx);
+		else
+			subExps.add(potentialSubExp);
+		
+		BoolExpr retExp = null;
+		for (Expr subExp : subExps) {
+			if (retExp == null) 
+				retExp = ctx.MkEq(nodeVar, subExp);
+			else 
+				retExp = ctx.MkOr(new BoolExpr[]{retExp, ctx.MkEq(nodeVar, subExp)});
+		}
+		return retExp;
 	}
 							
 	public static BoolExpr getExpConstraint(AbstractPDGNode node, ProgramDependenceGraph pdg, 
 											Map<Integer, Expr> expNodeToZ3Var, Context ctx) 
 															throws Z3Exception {
-		Expr nodeVar = IntraProcedureConstraints.getOrAddAnyVar(expNodeToZ3Var, node.getNodeId(), ctx);
+		Expr nodeVar = InterProcedureConstraints.getOrAddAnyVar(expNodeToZ3Var, node.getNodeId(), ctx);
 		String name = node.getName();
 		
-		if (node.getNodeType() == PDGNodeType.BASE_VALUE) {
+		if ((node.getNodeType() == PDGNodeType.BASE_VALUE) &&
+				pdg.incomingEdgesOf(node).isEmpty()) {
 			return ctx.MkEq(nodeVar, getConst(name, ctx));
 		}
 		
@@ -94,7 +135,9 @@ public class ExpressionConstraints {
 			// ! case
 			// phi case
 			BoolExpr phiExp = getPhiExp(name, node, pdg, expNodeToZ3Var, ctx);
-			if (phiExp != null) return phiExp;
+			if (phiExp != null) {
+				return phiExp;
+			}
 		}
 		// unary case
 		return getUnaryExp(name, node, pdg, expNodeToZ3Var, ctx);
