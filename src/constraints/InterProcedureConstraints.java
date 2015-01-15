@@ -54,28 +54,6 @@ public class InterProcedureConstraints {
 		return nodeVar;
 	}
 	
-	public static BoolExpr andConstraints(BoolExpr oldConstraint, Context ctx, BoolExpr andConstraint) 
-			throws Z3Exception {
-		if (oldConstraint != null) {
-			if (andConstraint != null) {
-				return ctx.MkAnd(new BoolExpr[] {oldConstraint, andConstraint});
-			}
-			return oldConstraint;
-		}
-		return andConstraint;
-	}
-	
-	public static BoolExpr orConstraints(BoolExpr oldConstraint, Context ctx, BoolExpr orConstraint) 
-			throws Z3Exception {
-		if (oldConstraint != null) {
-			if (orConstraint != null) {
-				return ctx.MkOr(new BoolExpr[] {oldConstraint, orConstraint});
-			}
-			return oldConstraint;
-		}
-		return orConstraint;
-	}
-
 	// the following methods should probably be in the node and edge classes	
 	public static boolean isExprNode(AbstractPDGNode node) {
 		switch (node.getNodeType()) {
@@ -199,6 +177,15 @@ public class InterProcedureConstraints {
 		return null;
 	}
 	
+	public static String getFunctionNameForCall(AbstractPDGNode node, ProgramDependenceGraph pdg) {
+		AbstractPDGNode calleeNode = null;
+		if (isReturnNode(node, pdg))
+			calleeNode = getCrossFunctionNode(node, pdg, true);
+		else if (isCallerNode(node, pdg))
+			calleeNode = getCrossFunctionNode(node, pdg, false);
+		return calleeNode.getProcedureName();
+	}
+	
 	public static AbstractPDGNode getSourceNodeByType(Set<PDGEdge> edges, PDGEdgeType type) {
 		for (PDGEdge edge : edges) {
 			if (edge.getType() == type)
@@ -300,7 +287,7 @@ public class InterProcedureConstraints {
 				assert(edge.getType() == PDGEdgeType.MERGE);
 				mergeNode = edge.getSource();
 				BoolExpr newConstraint = getOrAddVar(pdgNodeToZ3Var, mergeNode.getNodeId(), ctx);
-				pcConstraint = orConstraints(pcConstraint, ctx, newConstraint);
+				pcConstraint = Z3Addons.orConstraints(pcConstraint, ctx, newConstraint);
 			}
 		}
 		
@@ -347,7 +334,7 @@ public class InterProcedureConstraints {
 				if ((edge.getType() == PDGEdgeType.COPY) || (edge.getType() == PDGEdgeType.EXP)) {
 					copyExplicitNode = edge.getSource();
 					BoolExpr newConstraint = getOrAddVar(pdgNodeToZ3Var, copyExplicitNode.getNodeId(), ctx);
-					pcConstraint = andConstraints(pcConstraint, ctx, newConstraint);
+					pcConstraint = Z3Addons.andConstraints(pcConstraint, ctx, newConstraint);
 				}
 			}
 		}
@@ -374,7 +361,7 @@ public class InterProcedureConstraints {
 				AbstractPDGNode source = edge.getSource();
 				if (edge.getType() == PDGEdgeType.CONJUNCTION) {
 					BoolExpr newVar = getOrAddVar(pdgNodeToZ3Var, source.getNodeId(), ctx);
-					pcConstraint = andConstraints(pcConstraint, ctx, newVar);
+					pcConstraint = Z3Addons.andConstraints(pcConstraint, ctx, newVar);
 				}
 			}
 		}
@@ -390,23 +377,23 @@ public class InterProcedureConstraints {
 											Map<Integer, Expr> expNodeToZ3Var) 
 											throws Z3Exception {
 		// merge type
-		pcConstraint = andConstraints(pcConstraint, ctx,
+		pcConstraint = Z3Addons.andConstraints(pcConstraint, ctx,
 				getMergeControlFlowConstraints(edges, pdg, ctx, pdgNodeToZ3Var));
 		
 		// true type
-		pcConstraint = andConstraints(pcConstraint, ctx,
+		pcConstraint = Z3Addons.andConstraints(pcConstraint, ctx,
 				getBooleanControlFlowConstraints(edges, pdg, ctx, pdgNodeToZ3Var, expNodeToZ3Var));
 
 		// copy and explicit type
-		pcConstraint = andConstraints(pcConstraint, ctx,
+		pcConstraint = Z3Addons.andConstraints(pcConstraint, ctx,
 				getCopyExplicitControlFlowConstraints(edges, pdg, ctx, pdgNodeToZ3Var));
 		
 		// implicit type
-		pcConstraint = andConstraints(pcConstraint, ctx,
+		pcConstraint = Z3Addons.andConstraints(pcConstraint, ctx,
 				getImplicitControlFlowConstraints(edges, pdg, ctx, pdgNodeToZ3Var));
 
 		// conjunction type
-		pcConstraint = andConstraints(pcConstraint, ctx,
+		pcConstraint = Z3Addons.andConstraints(pcConstraint, ctx,
 				getConjunctionControlFlowConstraints(edges, pdg, ctx, pdgNodeToZ3Var));
 		
 		return pcConstraint;
@@ -514,25 +501,62 @@ public class InterProcedureConstraints {
 		constraints.add(ctx.MkImplies(target, ctx.MkEq(nodeExprVar, calleeExprVar)));
 	}
 
+
+	
+	public static BoolExpr getUniqueFuncConstraints(AbstractPDGNode node, 
+										BoolExpr origFuncConstraint, 
+										BoolExpr funcConstraint,
+										BoolExpr origEqExp, 
+										Context ctx) throws Z3Exception {
+		if (origEqExp != null && isExprNode(node)) {
+			origFuncConstraint = Z3Addons.removeConstraintContainingExp(origFuncConstraint, origEqExp, ctx);
+		}
+		if (origEqExp != null && !isExprNode(node)) {
+			BoolExpr removedSubConstraint = 
+					Z3Addons.removeConstraintContainingExp(origFuncConstraint, origEqExp, ctx);
+			if (removedSubConstraint == null) {
+				if (origFuncConstraint != null) return origFuncConstraint;
+			} else {
+				if (!removedSubConstraint.equals(origFuncConstraint)) 
+					return origFuncConstraint;
+			}
+		}
+		return Z3Addons.orConstraints(origFuncConstraint, ctx, funcConstraint);
+	}
+	
 	public static void updateFuncConstraint(AbstractPDGNode node, 
 											ProgramDependenceGraph pdg,
 											Set<BoolExpr> constraints,
 											Map<String, BoolExpr> funcToConstraint,
-											Context ctx) throws Z3Exception {
+											Context ctx,
+											Map<Integer, BoolExpr> pdgNodeToZ3Var) 
+													throws Z3Exception {
 		// construct constraint conjunction
+		BoolExpr nodePCVar = getOrAddVar(pdgNodeToZ3Var, node.getNodeId(), ctx);
+		BoolExpr origEqExp = null;
 		BoolExpr funcConstraint = null;
 		for (BoolExpr constraint : constraints) {
-			funcConstraint = andConstraints(funcConstraint, ctx, constraint);
+			funcConstraint = Z3Addons.andConstraints(funcConstraint, ctx, constraint);
+			
+			// capture an equality constraint that don't include the given node, if
+			// the given node is a return variable - this equality constraint is in
+			// another possibility for funcToConstraint iff the constraints for this
+			// function were already built, but without the return variable and its
+			// constraint contributions
+			if (constraint.IsEq() && 
+					!Z3Addons.containsVar(constraint, nodePCVar)) {
+				origEqExp = constraint;
+			}
 		}
 		
-		AbstractPDGNode calleeNode = null;
-		if (isReturnNode(node, pdg))
-			calleeNode = getCrossFunctionNode(node, pdg, true);
-		else if (isCallerNode(node, pdg))
-			calleeNode = getCrossFunctionNode(node, pdg, false);
-		String functionName = calleeNode.getProcedureName();
+		// find function name for this call
+		String functionName = getFunctionNameForCall(node, pdg);
 		
-		funcConstraint = orConstraints(funcToConstraint.get(functionName), ctx, funcConstraint);
+		// later in the iteration, we may have run into a formal assignment when a 
+		// constraint was originally based on the exit PC - this is a more specific 
+		// constraint then, so we add it here.
+		BoolExpr origFuncConstraint = funcToConstraint.get(functionName);
+		funcConstraint = getUniqueFuncConstraints(node, origFuncConstraint, funcConstraint, origEqExp, ctx);
 		funcToConstraint.put(functionName, funcConstraint);
 	}
 
@@ -561,7 +585,7 @@ public class InterProcedureConstraints {
 				BoolExpr nodePCVar = getOrAddVar(pdgNodeToZ3Var, nodeId, ctx);
 				BoolExpr sourceLabelPCVar = getOrAddVar(pdgNodeToZ3Var, sourceId, ctx);
 				BoolExpr pcConstraint = ctx.MkEq(nodePCVar, sourceLabelPCVar);
-				constraintPerLabel = andConstraints(constraintPerLabel, ctx, pcConstraint);
+				constraintPerLabel = Z3Addons.andConstraints(constraintPerLabel, ctx, pcConstraint);
 				
 				// Exp constraint
 				if (isExprNode(node)) {
@@ -569,10 +593,10 @@ public class InterProcedureConstraints {
 					Expr sourceLabelExpVar = getOrAddAnyVar(expNodeToZ3Var, sourceId, ctx);
 					BoolExpr expConstraint = ctx.MkImplies(nodePCVar, 
 												ctx.MkEq(nodeExpVar, sourceLabelExpVar));
-					constraintPerLabel = andConstraints(constraintPerLabel, ctx, expConstraint);	
+					constraintPerLabel = Z3Addons.andConstraints(constraintPerLabel, ctx, expConstraint);	
 				}
 			}
-			fullConstraint = orConstraints(fullConstraint, ctx, constraintPerLabel);
+			fullConstraint = Z3Addons.orConstraints(fullConstraint, ctx, constraintPerLabel);
 		}
 		
 		constraints.add(fullConstraint);
@@ -590,7 +614,7 @@ public class InterProcedureConstraints {
 				getFunctionConstraints(cur,  pdg, ctx, pdgNodeToZ3Var, expNodeToZ3Var, newConstraints);					
 				getNonFunctionConstraints(cur,  pdg, ctx, pdgNodeToZ3Var, expNodeToZ3Var, constraints);
 			}
-			updateFuncConstraint(node, pdg, newConstraints, funcToConstraint, ctx);
+			updateFuncConstraint(node, pdg, newConstraints, funcToConstraint, ctx, pdgNodeToZ3Var);
 		} else if (isEntryNode(node, pdg) && !isMainEntry(node, pdg) &&
 						!funcToConstraint.containsKey(node.getProcedureName())) {
 			Set<AbstractPDGNode> nodes = getEntryNodes(node, pdg);
@@ -678,7 +702,7 @@ public class InterProcedureConstraints {
 			
 			if (isMainEntry(node, pdg)) {
 				// prune pc summary in MAIN, we don't need to go further back.
-				// this is a hack for debugging, shouldn't be needed later
+				// this is for debugging, shouldn't be needed later
 				continue;
 			}
 			
@@ -757,7 +781,7 @@ public class InterProcedureConstraints {
 		// test: Unseen/ Seen: 36
 		// 		 Phi1: 35
 		//  	UnseenAnd/ SeenAnd : 43
-		findMatchingNodeIds(pdg, "PC MERGE");
-		getAndCheckConstraints(pdg, 32);
+		findMatchingNodeIds(pdg, "b = 1");
+		getAndCheckConstraints(pdg, 44);
 	}
 }
