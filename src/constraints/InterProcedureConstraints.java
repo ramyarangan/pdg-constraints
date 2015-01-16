@@ -682,12 +682,20 @@ public class InterProcedureConstraints {
 	public static Set<BoolExpr> getConstraints(int nodeID, ProgramDependenceGraph pdg, 
 														Context ctx) 
 														throws Z3Exception {
+		return getConstraints(nodeID, pdg, ctx, new HashSet<Integer>(), 
+												new HashMap<Integer, BoolExpr>(),
+												new HashMap<Integer, Expr>(),
+												new HashMap<String, BoolExpr>());
+	}
+	
+	public static Set<BoolExpr> getConstraints(int nodeID, ProgramDependenceGraph pdg, 
+												Context ctx, Set<Integer> visited, 
+												Map<Integer, BoolExpr> pdgNodeToZ3Var, 
+												Map<Integer, Expr> expNodeToZ3Var,
+												Map<String, BoolExpr> funcToConstraint) 
+												throws Z3Exception {
 		Deque<Integer> workQueue = new ArrayDeque<>();
-		Set<Integer> visited = new HashSet<>();
 		Set<BoolExpr> constraints = new LinkedHashSet<>();
-		Map<Integer, BoolExpr> pdgNodeToZ3Var = new HashMap<>();
-		Map<Integer, Expr> expNodeToZ3Var = new HashMap<>();
-		Map<String, BoolExpr> funcToConstraint = new HashMap<>();
 		
 		BoolExpr base = Z3Addons.getFreshBoolVar(ctx);
 		workQueue.add(nodeID);
@@ -714,7 +722,26 @@ public class InterProcedureConstraints {
 		constraints.addAll(funcToConstraint.values());
 		
 		if (debugMode) printVars(pdgNodeToZ3Var, expNodeToZ3Var, pdg);
-		return constraints; 		
+		return constraints; 
+	}
+	
+	public static Set<BoolExpr> getConstraintsPath(ArrayList<Integer> ids, 
+												ProgramDependenceGraph pdg, 
+												Context ctx) 
+												throws Z3Exception {
+		Set<BoolExpr> constraints = new LinkedHashSet<BoolExpr>();
+		Set<Integer> visited = new HashSet<Integer>();
+		Map<Integer, BoolExpr> pdgNodeToZ3Var = new HashMap<Integer, BoolExpr>();
+		Map<Integer, Expr> expNodeToZ3Var = new HashMap<Integer, Expr>();
+		Map<String, BoolExpr> funcToConstraint = new HashMap<String, BoolExpr>();
+
+		for (Integer id : ids) {
+			Set<BoolExpr> newConstraints = getConstraints(id, pdg, ctx, visited, 
+									pdgNodeToZ3Var, expNodeToZ3Var, funcToConstraint);
+			constraints.addAll(newConstraints);
+		}
+
+		return constraints;
 	}
 	
 	public static void printVars(Map<Integer, BoolExpr> pdgNodeToZ3Var, 
@@ -755,6 +782,16 @@ public class InterProcedureConstraints {
 		System.out.println();
 		Model model = ConstraintCheck.Check(ctx, constraints);
 		System.out.println(model);		
+	}
+	
+	public static void getAndCheckConstraints(ProgramDependenceGraph pdg, ArrayList<Integer> ids)
+																throws Z3Exception {
+		Context ctx = new Context();
+		Set<BoolExpr> constraints = getConstraintsPath(ids, pdg, ctx);
+		printConstraints(constraints);
+		System.out.println();
+		Model model = ConstraintCheck.Check(ctx, constraints);
+		System.out.println(model);	
 	}
 	
 	public static List<Integer> findMatchingNodeIds(ProgramDependenceGraph pdg, String phrase) {
