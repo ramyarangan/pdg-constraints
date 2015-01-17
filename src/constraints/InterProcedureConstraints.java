@@ -301,6 +301,7 @@ public class InterProcedureConstraints {
 		AbstractPDGNode booleanNode = null;
 		BoolExpr booleanNodeExp = null;
 		
+		// expression boolean constraint
 		// true type
 		AbstractPDGNode trueNode = getSourceNodeByType(edges,PDGEdgeType.TRUE);
 		if (trueNode != null) {
@@ -316,6 +317,7 @@ public class InterProcedureConstraints {
 			booleanNodeExp = ctx.MkNot(booleanNodeExp);
 		}	
 		
+		// PC boolean constraint
 		if (booleanNode != null) {
 			BoolExpr booleanNodePCVar = getOrAddVar(pdgNodeToZ3Var, booleanNode.getNodeId(), ctx);
 			return ctx.MkAnd(new BoolExpr[]{booleanNodeExp, booleanNodePCVar});
@@ -419,6 +421,7 @@ public class InterProcedureConstraints {
 		Set<PDGEdge> edges = new HashSet<PDGEdge>(graphEdges);
 				
 		// remove all edges that are entry or exit edges; these are handled separately
+		// in function constraint formation
 		List<PDGEdge> removeList = new ArrayList<PDGEdge>();
 		for (PDGEdge edge : edges) {
 			if (edge.getEdgeLabel() != null) removeList.add(edge);
@@ -501,8 +504,6 @@ public class InterProcedureConstraints {
 		constraints.add(ctx.MkImplies(target, ctx.MkEq(nodeExprVar, calleeExprVar)));
 	}
 
-
-	
 	public static BoolExpr getUniqueFuncConstraints(AbstractPDGNode node, 
 										BoolExpr origFuncConstraint, 
 										BoolExpr funcConstraint,
