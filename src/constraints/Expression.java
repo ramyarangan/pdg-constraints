@@ -16,8 +16,7 @@ import com.microsoft.z3.Context;
 import com.microsoft.z3.Expr;
 import com.microsoft.z3.Z3Exception;
 
-public class ExpressionConstraints {
-
+public class Expression {
 	public static Expr getOrAddAnyVar(Map<Integer, Expr> mapToZ3Var, AbstractPDGNode node, Context ctx) 
 			throws Z3Exception {
 		if (mapToZ3Var.containsKey(node.getNodeId())) {
@@ -159,7 +158,7 @@ public class ExpressionConstraints {
 	public static BoolExpr getBinopExp(String name, AbstractPDGNode node, ProgramDependenceGraph pdg,
 			Map<Integer, Expr> expNodeToZ3Var, Context ctx) throws Z3Exception {
 		Expr nodeVar = getOrAddAnyVar(expNodeToZ3Var, node, ctx);
-		BoolExpr exp = null;
+		Expr exp = null;
 		if (name.contains("^")) {
 			int opIndex = name.indexOf("^");
 			String leftName = name.substring(0, opIndex - 1);
@@ -168,15 +167,54 @@ public class ExpressionConstraints {
 			Expr rightVar = getZ3VarFromSources(rightName, node, pdg, expNodeToZ3Var, ctx);
 			exp = ctx.MkXor((BoolExpr)leftVar, (BoolExpr)rightVar);
 		}
-		if (name.contains(">=")) {
+		else if (name.contains(">=")) {
 			int opIndex = name.indexOf(">=");
+			String leftName = name.substring(0, opIndex - 1);
+			String rightName = name.substring(opIndex + 3);
+			Expr leftVar = getZ3VarFromSources(leftName, node, pdg, expNodeToZ3Var, ctx);
+			Expr rightVar = getZ3VarFromSources(rightName, node, pdg, expNodeToZ3Var, ctx);
+			
+			exp = ctx.MkGe((ArithExpr)leftVar, (ArithExpr)rightVar);		
+		}
+		else if (name.contains("<=")) {
+			int opIndex = name.indexOf("<=");
 			String leftName = name.substring(0, opIndex - 1);
 			String rightName = name.substring(opIndex + 3);
 			System.out.println(leftName + " " + rightName);
 			Expr leftVar = getZ3VarFromSources(leftName, node, pdg, expNodeToZ3Var, ctx);
 			Expr rightVar = getZ3VarFromSources(rightName, node, pdg, expNodeToZ3Var, ctx);
 			
-			exp = ctx.MkGe((ArithExpr)leftVar, (ArithExpr)rightVar);		
+			exp = ctx.MkLe((ArithExpr)leftVar, (ArithExpr)rightVar);		
+		}
+		else if (name.contains(">")) {
+			int opIndex = name.indexOf(">");
+			String leftName = name.substring(0, opIndex - 1);
+			String rightName = name.substring(opIndex + 2);
+			System.out.println(leftName + " " + rightName);
+			Expr leftVar = getZ3VarFromSources(leftName, node, pdg, expNodeToZ3Var, ctx);
+			Expr rightVar = getZ3VarFromSources(rightName, node, pdg, expNodeToZ3Var, ctx);
+			
+			exp = ctx.MkGt((ArithExpr)leftVar, (ArithExpr)rightVar);		
+		}
+		else if (name.contains("<")) {
+			int opIndex = name.indexOf("<");
+			String leftName = name.substring(0, opIndex - 1);
+			String rightName = name.substring(opIndex + 2);
+			System.out.println(leftName + " " + rightName);
+			Expr leftVar = getZ3VarFromSources(leftName, node, pdg, expNodeToZ3Var, ctx);
+			Expr rightVar = getZ3VarFromSources(rightName, node, pdg, expNodeToZ3Var, ctx);
+			
+			exp = ctx.MkLt((ArithExpr)leftVar, (ArithExpr)rightVar);		
+		}
+		else if (name.contains("+")) {
+			int opIndex = name.indexOf("+");
+			String leftName = name.substring(0, opIndex - 1);
+			String rightName = name.substring(opIndex + 2);
+			System.out.println(leftName + " " + rightName);
+			Expr leftVar = getZ3VarFromSources(leftName, node, pdg, expNodeToZ3Var, ctx);
+			Expr rightVar = getZ3VarFromSources(rightName, node, pdg, expNodeToZ3Var, ctx);
+			
+			exp = ctx.MkAdd(new ArithExpr[] {(ArithExpr)leftVar, (ArithExpr)rightVar});		
 		}
 		if (exp == null)
 			return null;
@@ -201,7 +239,7 @@ public class ExpressionConstraints {
 		
 		for (PDGEdge edge : pdg.incomingEdgesOf(node)) {
 			AbstractPDGNode source = edge.getSource();
-			if (InterProcedureConstraints.isExprNode(source)) {
+			if (InterProcedure.isExprNode(source)) {
 				Expr newVar = getOrAddAnyVar(expNodeToZ3Var, source, ctx);
 				expSourceNodes.add(newVar);
 			}
@@ -242,7 +280,7 @@ public class ExpressionConstraints {
 
 	public static BoolExpr getExpConstraint(AbstractPDGNode node, ProgramDependenceGraph pdg, 
 											Map<Integer, Expr> expNodeToZ3Var, Context ctx) 
-															throws Z3Exception {
+															throws Z3Exception {		
 		Expr nodeVar = getOrAddAnyVar(expNodeToZ3Var, node, ctx);
 		String name = node.getName();
 		

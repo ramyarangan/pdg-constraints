@@ -1,6 +1,6 @@
 package test.constraints.interprocedural;
 
-public class MultipleCallsSeen {
+public class MultipleCallUnseen {
     @SuppressWarnings("unused")
 	private static boolean y;
 	
@@ -11,6 +11,6 @@ public class MultipleCallsSeen {
 	}
 
 	public static boolean foo(boolean x) {
-		return true;
+		return false;
 	}
 }
