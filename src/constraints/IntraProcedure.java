@@ -27,7 +27,7 @@ public class IntraProcedure {
 			for (PDGEdge edge : edges) {
 				assert(edge.getType() == PDGEdgeType.MERGE);
 				mergeNode = edge.getSource();
-				BoolExpr newConstraint = InterProcedure.getOrAddVar(pdgNodeToZ3Var, mergeNode.getNodeId(), ctx);
+				BoolExpr newConstraint = PDGConstraint.getOrAddVar(pdgNodeToZ3Var, mergeNode.getNodeId(), ctx);
 				pcConstraint = Z3Addons.orConstraints(pcConstraint, ctx, newConstraint);
 			}
 		}
@@ -61,7 +61,7 @@ public class IntraProcedure {
 		
 		// PC boolean constraint
 		if (booleanNode != null) {
-			BoolExpr booleanNodePCVar = InterProcedure.getOrAddVar(pdgNodeToZ3Var, booleanNode.getNodeId(), ctx);
+			BoolExpr booleanNodePCVar = PDGConstraint.getOrAddVar(pdgNodeToZ3Var, booleanNode.getNodeId(), ctx);
 			return ctx.MkAnd(new BoolExpr[]{booleanNodeExp, booleanNodePCVar});
 		}
 		return null;
@@ -79,7 +79,7 @@ public class IntraProcedure {
 			for (PDGEdge edge : edges) {
 				if ((edge.getType() == PDGEdgeType.COPY) || (edge.getType() == PDGEdgeType.EXP)) {
 					copyExplicitNode = edge.getSource();
-					BoolExpr newConstraint = InterProcedure.getOrAddVar(pdgNodeToZ3Var, copyExplicitNode.getNodeId(), ctx);
+					BoolExpr newConstraint = PDGConstraint.getOrAddVar(pdgNodeToZ3Var, copyExplicitNode.getNodeId(), ctx);
 					pcConstraint = Z3Addons.andConstraints(pcConstraint, ctx, newConstraint);
 				}
 			}
@@ -92,7 +92,7 @@ public class IntraProcedure {
 			Context ctx, Map<Integer, BoolExpr> pdgNodeToZ3Var) throws Z3Exception {		
 		AbstractPDGNode implicitNode = PDGHelper.getSourceNodeByType(edges,PDGEdgeType.IMPLICIT);
 		if (implicitNode != null) {
-			return InterProcedure.getOrAddVar(pdgNodeToZ3Var, implicitNode.getNodeId(), ctx);
+			return PDGConstraint.getOrAddVar(pdgNodeToZ3Var, implicitNode.getNodeId(), ctx);
 		}
 		return null;
 	}
@@ -106,7 +106,7 @@ public class IntraProcedure {
 			for (PDGEdge edge : edges) {
 				AbstractPDGNode source = edge.getSource();
 				if (edge.getType() == PDGEdgeType.CONJUNCTION) {
-					BoolExpr newVar = InterProcedure.getOrAddVar(pdgNodeToZ3Var, source.getNodeId(), ctx);
+					BoolExpr newVar = PDGConstraint.getOrAddVar(pdgNodeToZ3Var, source.getNodeId(), ctx);
 					pcConstraint = Z3Addons.andConstraints(pcConstraint, ctx, newVar);
 				}
 			}
@@ -174,7 +174,7 @@ public class IntraProcedure {
 		if (edges.isEmpty()) return;
 	
 		BoolExpr pcConstraint = null;
-		BoolExpr nodeVar = InterProcedure.getOrAddVar(pdgNodeToZ3Var, node.getNodeId(), ctx);
+		BoolExpr nodeVar = PDGConstraint.getOrAddVar(pdgNodeToZ3Var, node.getNodeId(), ctx);
 	
 		pcConstraint = addIntraProceduralPCConstraints(pcConstraint, ctx, 
 									edges, pdg, ctx, pdgNodeToZ3Var, expNodeToZ3Var);
@@ -199,9 +199,9 @@ public class IntraProcedure {
 		}
 		AbstractPDGNode pcParent = PDGHelper.getSourceNodeByType(pdg.incomingEdgesOf(parent), 
 																PDGEdgeType.IMPLICIT);
-		BoolExpr pcParentVar = InterProcedure.getOrAddVar(pdgNodeToZ3Var, pcParent.getNodeId(), ctx);
-		BoolExpr pcNodeVar = InterProcedure.getOrAddVar(pdgNodeToZ3Var, node.getNodeId(), ctx);
-		BoolExpr parentVar = InterProcedure.getOrAddVar(pdgNodeToZ3Var, parent.getNodeId(), ctx);
+		BoolExpr pcParentVar = PDGConstraint.getOrAddVar(pdgNodeToZ3Var, pcParent.getNodeId(), ctx);
+		BoolExpr pcNodeVar = PDGConstraint.getOrAddVar(pdgNodeToZ3Var, node.getNodeId(), ctx);
+		BoolExpr parentVar = PDGConstraint.getOrAddVar(pdgNodeToZ3Var, parent.getNodeId(), ctx);
 		constraints.add(ctx.MkEq(ctx.MkAnd(new BoolExpr[]{expConstraint, pcNodeVar}), 
 														pcParentVar));
 		constraints.add(ctx.MkImplies(expConstraint, parentVar));
@@ -238,11 +238,11 @@ public class IntraProcedure {
 			BoolExpr nodeConstraint = Expression.getExpConstraint(node, pdg, expNodeToZ3Var, ctx);
 			if (nodeConstraint != null) {
 				expConstraint = nodeConstraint;
-				if (InterProcedure.debugMode) System.out.println("Node constraint for " + node.getName() + " " + expConstraint);
+				if (PDGConstraint.debugMode) System.out.println("Node constraint for " + node.getName() + " " + expConstraint);
 			}
 		}
 		
-		BoolExpr nodeVar = InterProcedure.getOrAddVar(pdgNodeToZ3Var, node.getNodeId(), ctx);
+		BoolExpr nodeVar = PDGConstraint.getOrAddVar(pdgNodeToZ3Var, node.getNodeId(), ctx);
 		if (expConstraint != null) {
 			constraints.add(ctx.MkImplies(nodeVar, expConstraint));
 			if (PDGHelper.isPhiOrMergeNode(node, pdg)) addMergeConstraints(expConstraint, node, pdg, ctx, pdgNodeToZ3Var, 

@@ -5,7 +5,7 @@ import accrue.pdg.graph.PDGFactory;
 
 import com.microsoft.z3.Z3Exception;
 
-import constraints.InterProcedure;
+import constraints.GraphConstraintInfo;
 
 public class ConstraintUnitTest {
 	private static String filename = "/Users/ramyarangan/Dropbox/Research/PLResearch/eclipseworkspace/pdg-constraints/tests";
@@ -18,8 +18,8 @@ public class ConstraintUnitTest {
 	public static void testAndPrintConstraints(String filename, String phrase,
 													int id, boolean test) throws Z3Exception {
 		ProgramDependenceGraph pdg = getPDGJSON(filename);
-		InterProcedure.findMatchingNodeIds(pdg, phrase);
-		if (test) InterProcedure.getAndCheckConstraints(pdg, id);
+		GraphConstraintInfo.findMatchingNodeIds(pdg, phrase);
+		if (test) GraphConstraintInfo.getAndCheckConstraints(pdg, id);
 	}
 	
 	public static void testSeen() throws Z3Exception {
