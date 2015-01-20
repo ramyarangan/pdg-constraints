@@ -4,20 +4,15 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import accrue.pdg.PDGEdge;
-import accrue.pdg.PDGEdgeType;
 import accrue.pdg.ProgramDependenceGraph;
 import accrue.pdg.graph.PDGFactory;
 import accrue.pdg.node.AbstractPDGNode;
-import accrue.pdg.node.PDGNodeType;
-import accrue.pdg.util.CallSiteEdgeLabel;
-import accrue.pdg.util.CallSiteEdgeLabel.SiteType;
 
 import com.microsoft.z3.BoolExpr;
 import com.microsoft.z3.Context;
@@ -26,7 +21,7 @@ import com.microsoft.z3.Model;
 import com.microsoft.z3.Z3Exception;
 
 public class InterProcedure {
-	private static final boolean debugMode = true;
+	static final boolean debugMode = true;
 		
 	public static BoolExpr getOrAddVar(Map<Integer, BoolExpr> mapToZ3Var, int id, Context ctx) 
 				throws Z3Exception {
@@ -41,476 +36,6 @@ public class InterProcedure {
 		return nodeVar;
 	}
 	
-	// the following methods should probably be in the node and edge classes	
-	public static boolean isExprNode(AbstractPDGNode node) {
-		switch (node.getNodeType()) {
-			case LOCAL:
-			case BASE_VALUE:
-			case OTHER_EXPRESSION:
-			case EXIT_ASSIGNMENT:
-			case EXIT_SUMMARY:
-			case FORMAL_ASSIGNMENT:
-			case FORMAL_SUMMARY:
-			case ABSTRACT_LOCATION:
-				return true;
-			default:
-				return false;
-		}
-	}
-
-	public static boolean isPCNode(AbstractPDGNode node) {
-		return !isExprNode(node);
-	}
-	
-	public static boolean isPhiOrMergeNode(AbstractPDGNode node, ProgramDependenceGraph pdg) {
-		return ((node.getName().indexOf("phi") == 0) ||
-				(getSourceNodeByType(pdg.incomingEdgesOf(node), PDGEdgeType.MERGE) != null));
-	}
-	
-	public static boolean isReturnNode(AbstractPDGNode node, ProgramDependenceGraph pdg) {
-		Set<PDGEdge> incomingEdges = pdg.incomingEdgesOf(node);
-		for (PDGEdge edge : incomingEdges) {
-			CallSiteEdgeLabel label = edge.getEdgeLabel();
-			if ((label != null) && (label.getType() == SiteType.EXIT)) {
-				return true;
-			}
-		}
-		return false;
-	}
-	
-	public static boolean isCallerNode(AbstractPDGNode node, ProgramDependenceGraph pdg) {
-		Set<PDGEdge> outgoingEdges = pdg.outgoingEdgesOf(node);
-		for (PDGEdge edge : outgoingEdges) {
-			CallSiteEdgeLabel label = edge.getEdgeLabel();
-			if ((label != null) && (label.getType() == SiteType.ENTRY)) return true;
-		}
-		return false;				
-	}
-	
-	public static boolean isExitNode(AbstractPDGNode node, ProgramDependenceGraph pdg) {
-		Set<PDGEdge> outgoingEdges = pdg.outgoingEdgesOf(node);
-		for (PDGEdge edge : outgoingEdges) {
-			CallSiteEdgeLabel label = edge.getEdgeLabel();
-			if ((label != null) && (label.getType() == SiteType.EXIT)) return true;
-		}
-		return false;
-	}
-
-	
-	public static boolean isEntryNode(AbstractPDGNode node, ProgramDependenceGraph pdg) {
-		Set<PDGEdge> incomingEdges = pdg.incomingEdgesOf(node);
-		for (PDGEdge edge : incomingEdges) {
-			CallSiteEdgeLabel label = edge.getEdgeLabel();
-			if ((label != null) && (label.getType() == SiteType.ENTRY)) return true;
-		}
-		return false;		
-	}
-	
-	/**
-	 * TODO: When this is used, it's for debug purposes. The final version of this will not 
-	 * stop at the main method. 
-	 * 
-	 * @param node
-	 * @param pdg
-	 * @return
-	 */
-	public static boolean isMainEntry(AbstractPDGNode node, ProgramDependenceGraph pdg) {
-		if (isEntryNode(node, pdg) &&
-				(node.getProcedureName().indexOf("main") != -1)) {
-			return true;
-		}
-		return false;		
-	}	
-	
-	public static AbstractPDGNode getLabelPredecessor(AbstractPDGNode node, 
-													ProgramDependenceGraph pdg, 
-													int labelID) {
-		for (PDGEdge edge : pdg.incomingEdgesOf(node)) {
-			if ((edge.getEdgeLabel() != null) &&
-				(edge.getEdgeLabel().getCallSiteID() == labelID))
-				return edge.getSource();
-		}
-		return null;
-	}
-	
-	public static Set<Integer> getAllSiteLabels(Set<AbstractPDGNode> nodes, ProgramDependenceGraph pdg) {
-		if (nodes.size() == 0) return null;
-		
-		Set<Integer> labels = new HashSet<Integer>();
-		Iterator<AbstractPDGNode> nodeIterator = nodes.iterator();
-		AbstractPDGNode anEntryNode = nodeIterator.next();
-		
-		for (PDGEdge edge : pdg.incomingEdgesOf(anEntryNode)) {
-			assert (edge.getEdgeLabel() != null);
-			labels.add(edge.getEdgeLabel().getCallSiteID());
-		}
-		return labels;
-	}
-	
-	public static AbstractPDGNode getCrossFunctionNode(AbstractPDGNode node, 
-									ProgramDependenceGraph pdg, boolean searchIncoming) {
-		String functionName = node.getProcedureName();
-		List<AbstractPDGNode> neighbors = new ArrayList<AbstractPDGNode>();
-		
-		if (searchIncoming) {
-			Set<PDGEdge> edges = pdg.incomingEdgesOf(node);
-			for (PDGEdge edge : edges) {
-				neighbors.add(edge.getSource());
-			}
-		} else {
-			Set<PDGEdge> edges = pdg.outgoingEdgesOf(node);
-			for (PDGEdge edge : edges) {
-				neighbors.add(edge.getTarget());
-			}
-		}
-		
-		for (AbstractPDGNode neighbor : neighbors) {
-			if (!neighbor.getProcedureName().equals(functionName)) return neighbor;
-		}
-		return null;
-	}
-	
-	public static String getFunctionNameForCall(AbstractPDGNode node, ProgramDependenceGraph pdg) {
-		AbstractPDGNode calleeNode = null;
-		if (isReturnNode(node, pdg))
-			calleeNode = getCrossFunctionNode(node, pdg, true);
-		else if (isCallerNode(node, pdg))
-			calleeNode = getCrossFunctionNode(node, pdg, false);
-		return calleeNode.getProcedureName();
-	}
-	
-	public static AbstractPDGNode getSourceNodeByType(Set<PDGEdge> edges, PDGEdgeType type) {
-		for (PDGEdge edge : edges) {
-			if (edge.getType() == type)
-				return edge.getSource();
-		}
-		return null;
-	}
-	
-	/**
-	 * Returns list of PDG nodes representing the backwards slice of
-	 * the nodes involved in the function call if the current node is a node in the
-	 * caller function representing the return of the called function
-	 * 
-	 * @param node
-	 * @param pdg
-	 * @return
-	 */
-	public static Set<AbstractPDGNode> getFunctionCallNodes(AbstractPDGNode node, 
-									ProgramDependenceGraph pdg) {
-		if (!isReturnNode(node, pdg)) return null;
-		
-		Set<AbstractPDGNode> nodes = new HashSet<AbstractPDGNode>();
-		String functionName = node.getProcedureName(); 
-				
-		// add return node and find PC node in caller
-		if (node.getNodeType() == PDGNodeType.EXIT_ASSIGNMENT) {
-			nodes.add(node);
-			for (PDGEdge incoming : pdg.incomingEdgesOf(node)) {
-				AbstractPDGNode sourceNode = incoming.getSource();
-				if (isReturnNode(sourceNode, pdg) &&
-					functionName.equals(sourceNode.getProcedureName())) {
-					node = sourceNode;
-					break;
-				}
-			}
-		}
-		
-		// add PC node from caller representing function return
-		nodes.add(node);
-		
-		// add PC node from caller representing function call
-		for (PDGEdge incoming : pdg.incomingEdgesOf(node)) {
-			AbstractPDGNode sourceNode = incoming.getSource();
-			if (isCallerNode(sourceNode, pdg) &&
-					functionName.equals(sourceNode.getProcedureName())) {
-				node = sourceNode;
-				break;
-			}
-		}
-		nodes.add(node);
-		
-		// add formal argument assignment nodes in caller
-		for (PDGEdge outgoing : pdg.outgoingEdgesOf(node)) {
-			AbstractPDGNode nextNode = outgoing.getTarget();
-			if (isCallerNode(nextNode, pdg) &&
-					functionName.equals(nextNode.getProcedureName()))
-				nodes.add(nextNode);
-		}
-		
-		return nodes;
-	}
-	
-	public static AbstractPDGNode getCallerPCNode(AbstractPDGNode node, ProgramDependenceGraph pdg) {
-		if (!isEntryNode(node, pdg)) return null;
-		if (node.getNodeType() == PDGNodeType.ENTRY_PC_SUMMARY) {
-			return getCrossFunctionNode(node, pdg, true);
-		}
-		assert(node.getNodeType() == PDGNodeType.FORMAL_SUMMARY);
-		AbstractPDGNode formalCallerNode = getCrossFunctionNode(node, pdg, true);
-		return getSourceNodeByType(pdg.incomingEdgesOf(formalCallerNode), PDGEdgeType.IMPLICIT);
-	}
-	
-	public static Set<AbstractPDGNode> getEntryNodes(AbstractPDGNode node, ProgramDependenceGraph pdg) {
-		Set<AbstractPDGNode> nodes = new HashSet<AbstractPDGNode>();
-		AbstractPDGNode callerPC = getCallerPCNode(node, pdg);
-		if (callerPC == null) return null;
-		// add entry PC node
-		nodes.add(getCrossFunctionNode(callerPC, pdg, false));
-		
-		// add formal argument node
-		for (PDGEdge edge : pdg.outgoingEdgesOf(callerPC)) {
-			AbstractPDGNode formalCallerNode = edge.getTarget();
-			if (isCallerNode(formalCallerNode, pdg)) {
-				nodes.add(getCrossFunctionNode(formalCallerNode, pdg, false));
-			}
-		}
-		
-		return nodes;
-	}
-	
-
-	public static BoolExpr getMergeControlFlowConstraints(Set<PDGEdge> edges, ProgramDependenceGraph pdg, 
-					Context ctx, Map<Integer, BoolExpr> pdgNodeToZ3Var) throws Z3Exception {
-		BoolExpr pcConstraint = null;
-
-		AbstractPDGNode mergeNode = getSourceNodeByType(edges,PDGEdgeType.MERGE);
-		if (mergeNode != null) {
-			for (PDGEdge edge : edges) {
-				assert(edge.getType() == PDGEdgeType.MERGE);
-				mergeNode = edge.getSource();
-				BoolExpr newConstraint = getOrAddVar(pdgNodeToZ3Var, mergeNode.getNodeId(), ctx);
-				pcConstraint = Z3Addons.orConstraints(pcConstraint, ctx, newConstraint);
-			}
-		}
-		
-		return pcConstraint;
-	}
-	
-	public static BoolExpr getBooleanControlFlowConstraints(Set<PDGEdge> edges, ProgramDependenceGraph pdg, 
-											Context ctx, 
-											Map<Integer, BoolExpr> pdgNodeToZ3Var, 
-											Map<Integer, Expr> expNodeToZ3Var) throws Z3Exception {
-		AbstractPDGNode booleanNode = null;
-		BoolExpr booleanNodeExp = null;
-		
-		// expression boolean constraint
-		// true type
-		AbstractPDGNode trueNode = getSourceNodeByType(edges,PDGEdgeType.TRUE);
-		if (trueNode != null) {
-			booleanNode = trueNode;
-			System.out.println(booleanNode.getName() + " " + booleanNode.getJavaType());
-			booleanNodeExp = (BoolExpr) Expression.getOrAddAnyVar(expNodeToZ3Var, trueNode, ctx);
-		}
-		
-		// false type
-		AbstractPDGNode falseNode = getSourceNodeByType(edges,PDGEdgeType.FALSE);
-		if (falseNode != null) {
-			booleanNode = falseNode;
-			booleanNodeExp = (BoolExpr) Expression.getOrAddAnyVar(expNodeToZ3Var, falseNode, ctx);
-			booleanNodeExp = ctx.MkNot(booleanNodeExp);
-		}	
-		
-		// PC boolean constraint
-		if (booleanNode != null) {
-			BoolExpr booleanNodePCVar = getOrAddVar(pdgNodeToZ3Var, booleanNode.getNodeId(), ctx);
-			return ctx.MkAnd(new BoolExpr[]{booleanNodeExp, booleanNodePCVar});
-		}
-		return null;
-	}
-	
-	public static BoolExpr getCopyExplicitControlFlowConstraints(Set<PDGEdge> edges, ProgramDependenceGraph pdg, 
-			Context ctx, Map<Integer, BoolExpr> pdgNodeToZ3Var) throws Z3Exception {		
-		BoolExpr pcConstraint = null;
-		
-		AbstractPDGNode copyExplicitNode = getSourceNodeByType(edges,PDGEdgeType.COPY);
-		if (copyExplicitNode == null) {
-			copyExplicitNode = getSourceNodeByType(edges,PDGEdgeType.EXP);
-		}
-		if (copyExplicitNode != null) {
-			for (PDGEdge edge : edges) {
-				if ((edge.getType() == PDGEdgeType.COPY) || (edge.getType() == PDGEdgeType.EXP)) {
-					copyExplicitNode = edge.getSource();
-					BoolExpr newConstraint = getOrAddVar(pdgNodeToZ3Var, copyExplicitNode.getNodeId(), ctx);
-					pcConstraint = Z3Addons.andConstraints(pcConstraint, ctx, newConstraint);
-				}
-			}
-		}
-		
-		return pcConstraint;
-	}
-	
-	public static BoolExpr getImplicitControlFlowConstraints(Set<PDGEdge> edges, ProgramDependenceGraph pdg, 
-			Context ctx, Map<Integer, BoolExpr> pdgNodeToZ3Var) throws Z3Exception {		
-		AbstractPDGNode implicitNode = getSourceNodeByType(edges,PDGEdgeType.IMPLICIT);
-		if (implicitNode != null) {
-			return getOrAddVar(pdgNodeToZ3Var, implicitNode.getNodeId(), ctx);
-		}
-		return null;
-	}
-
-	public static BoolExpr getConjunctionControlFlowConstraints(Set<PDGEdge> edges, ProgramDependenceGraph pdg, 
-			Context ctx, Map<Integer, BoolExpr> pdgNodeToZ3Var) throws Z3Exception {		
-		BoolExpr pcConstraint = null;
-		
-		AbstractPDGNode conjunctionNode = getSourceNodeByType(edges, PDGEdgeType.CONJUNCTION);
-		if (conjunctionNode != null) {
-			for (PDGEdge edge : edges) {
-				AbstractPDGNode source = edge.getSource();
-				if (edge.getType() == PDGEdgeType.CONJUNCTION) {
-					BoolExpr newVar = getOrAddVar(pdgNodeToZ3Var, source.getNodeId(), ctx);
-					pcConstraint = Z3Addons.andConstraints(pcConstraint, ctx, newVar);
-				}
-			}
-		}
-		
-		return pcConstraint;
-	}
-	
-	public static BoolExpr addIntraProceduralPCConstraints(BoolExpr pcConstraint, Context context, 
-											Set<PDGEdge> edges,
-											ProgramDependenceGraph pdg,
-											Context ctx,
-											Map<Integer, BoolExpr> pdgNodeToZ3Var,
-											Map<Integer, Expr> expNodeToZ3Var) 
-											throws Z3Exception {
-		// merge type
-		pcConstraint = Z3Addons.andConstraints(pcConstraint, ctx,
-				getMergeControlFlowConstraints(edges, pdg, ctx, pdgNodeToZ3Var));
-		
-		// true type
-		pcConstraint = Z3Addons.andConstraints(pcConstraint, ctx,
-				getBooleanControlFlowConstraints(edges, pdg, ctx, pdgNodeToZ3Var, expNodeToZ3Var));
-
-		// copy and explicit type
-		pcConstraint = Z3Addons.andConstraints(pcConstraint, ctx,
-				getCopyExplicitControlFlowConstraints(edges, pdg, ctx, pdgNodeToZ3Var));
-		
-		// implicit type
-		pcConstraint = Z3Addons.andConstraints(pcConstraint, ctx,
-				getImplicitControlFlowConstraints(edges, pdg, ctx, pdgNodeToZ3Var));
-
-		// conjunction type
-		pcConstraint = Z3Addons.andConstraints(pcConstraint, ctx,
-				getConjunctionControlFlowConstraints(edges, pdg, ctx, pdgNodeToZ3Var));
-		
-		return pcConstraint;
-	}
-	
-	/**
-	 * Note: Constraints based on labeled Entry and Exit edges are NOT returned here.
-	 * 
-	 * @param node
-	 * @param pdg
-	 * @param ctx
-	 * @param pdgNodeToZ3Var
-	 * @return
-	 * @throws Z3Exception
-	 */
-	public static void getControlFlowConstraints(AbstractPDGNode node, ProgramDependenceGraph pdg, 
-													Context ctx, 
-													Map<Integer, BoolExpr> pdgNodeToZ3Var,
-													Map<Integer, Expr> expNodeToZ3Var,
-													Set<BoolExpr> constraints) 
-													throws Z3Exception {				
-		Set<PDGEdge> graphEdges = pdg.incomingEdgesOf(node);
-		Set<PDGEdge> edges = new HashSet<PDGEdge>(graphEdges);
-				
-		// remove all edges that are entry or exit edges; these are handled separately
-		// in function constraint formation
-		List<PDGEdge> removeList = new ArrayList<PDGEdge>();
-		for (PDGEdge edge : edges) {
-			if (edge.getEdgeLabel() != null) removeList.add(edge);
-		}
-		edges.removeAll(removeList);
-		if (edges.isEmpty()) return;
-
-		BoolExpr pcConstraint = null;
-		BoolExpr nodeVar = getOrAddVar(pdgNodeToZ3Var, node.getNodeId(), ctx);
-
-		pcConstraint = addIntraProceduralPCConstraints(pcConstraint, ctx, 
-									edges, pdg, ctx, pdgNodeToZ3Var, expNodeToZ3Var);
-
-		if (pcConstraint != null)
-			constraints.add(ctx.MkEq(nodeVar, pcConstraint));
-	}
-
-	public static void addMergeConstraint(BoolExpr expConstraint, AbstractPDGNode node, 
-			ProgramDependenceGraph pdg, Context ctx, 
-			Map<Integer, BoolExpr> pdgNodeToZ3Var, 
-			Map<Integer, Expr> expNodeToZ3Var, 
-			Set<BoolExpr> constraints) throws Z3Exception {
-		Expr[] args = expConstraint.Args();
-		AbstractPDGNode parent = null;
-		for (PDGEdge incoming : pdg.incomingEdgesOf(node)) {
-			Expr expVar = expNodeToZ3Var.get(incoming.getSource().getNodeId());
-			if (expVar.equals(args[0]) || expVar.equals(args[1])) {
-				parent = incoming.getSource();
-				break;
-			}
-		}
-		AbstractPDGNode pcParent = getSourceNodeByType(pdg.incomingEdgesOf(parent), 
-																PDGEdgeType.IMPLICIT);
-		BoolExpr pcParentVar = getOrAddVar(pdgNodeToZ3Var, pcParent.getNodeId(), ctx);
-		BoolExpr pcNodeVar = getOrAddVar(pdgNodeToZ3Var, node.getNodeId(), ctx);
-		BoolExpr parentVar = getOrAddVar(pdgNodeToZ3Var, parent.getNodeId(), ctx);
-		constraints.add(ctx.MkEq(ctx.MkAnd(new BoolExpr[]{expConstraint, pcNodeVar}), 
-														pcParentVar));
-		constraints.add(ctx.MkImplies(expConstraint, parentVar));
-	}
-	
-	public static void addMergeConstraints(BoolExpr expConstraint, AbstractPDGNode node, 
-							ProgramDependenceGraph pdg, Context ctx, 
-							Map<Integer, BoolExpr> pdgNodeToZ3Var, 
-							Map<Integer, Expr> expNodeToZ3Var, 
-							Set<BoolExpr> constraints) throws Z3Exception {
-		while (expConstraint.IsOr()) {
-			addMergeConstraint((BoolExpr) expConstraint.Args()[1], node, pdg, ctx, 
-										pdgNodeToZ3Var, expNodeToZ3Var, constraints);
-			expConstraint = (BoolExpr) expConstraint.Args()[0];
-		}
-		addMergeConstraint(expConstraint, node, pdg, ctx, pdgNodeToZ3Var, expNodeToZ3Var, constraints);
-	}
-	
-	public static void getExpressionConstraints(AbstractPDGNode node, 
-									ProgramDependenceGraph pdg, Context ctx, 
-									Map<Integer, BoolExpr> pdgNodeToZ3Var, 
-									Map<Integer, Expr> expNodeToZ3Var, 
-									Set<BoolExpr> constraints) throws Z3Exception {
-		// skip nodes that receive arguments in a called function or receive return values
-		// in the caller function. These are function constraints which will be handled later.
-		if (isEntryNode(node, pdg) || isReturnNode(node, pdg))
-			return;
-
-		BoolExpr expConstraint = null;
-		
-		if (isExprNode(node)) {
-			// expression constraint should be something like this val constraint = 
-			// some combination of parent's val constraints.
-			BoolExpr nodeConstraint = Expression.getExpConstraint(node, pdg, expNodeToZ3Var, ctx);
-			if (nodeConstraint != null) {
-				expConstraint = nodeConstraint;
-				if (debugMode) System.out.println("Node constraint for " + node.getName() + " " + expConstraint);
-			}
-		}
-		
-		BoolExpr nodeVar = getOrAddVar(pdgNodeToZ3Var, node.getNodeId(), ctx);
-		if (expConstraint != null) {
-			constraints.add(ctx.MkImplies(nodeVar, expConstraint));
-			if (isPhiOrMergeNode(node, pdg)) addMergeConstraints(expConstraint, node, pdg, ctx, pdgNodeToZ3Var, 
-											expNodeToZ3Var, constraints);
-		}
-	}
-
-	public static void getNonFunctionConstraints(AbstractPDGNode node, ProgramDependenceGraph pdg,
-												Context ctx, Map<Integer, BoolExpr> pdgNodeToZ3Var,
-												Map<Integer, Expr> expNodeToZ3Var,
-												Set<BoolExpr> constraints) 
-												throws Z3Exception {
-		getControlFlowConstraints(node, pdg, ctx, pdgNodeToZ3Var, expNodeToZ3Var, constraints);
-		getExpressionConstraints(node, pdg, ctx, pdgNodeToZ3Var, expNodeToZ3Var, constraints);	
-	}
-	
 	public static void getFunctionConstraints(AbstractPDGNode node, ProgramDependenceGraph pdg,
 												Context ctx, Map<Integer, BoolExpr> pdgNodeToZ3Var,
 												Map<Integer, Expr> expNodeToZ3Var,
@@ -519,20 +44,20 @@ public class InterProcedure {
 		// control flow constraints
 		BoolExpr nodePCVar = getOrAddVar(pdgNodeToZ3Var, node.getNodeId(), ctx);
 		AbstractPDGNode calleeNode = null;
-		if (isReturnNode(node, pdg))
-			calleeNode = getCrossFunctionNode(node, pdg, true);
-		else if (isCallerNode(node, pdg))
-			calleeNode = getCrossFunctionNode(node, pdg, false);
+		if (PDGHelper.isReturnNode(node, pdg))
+			calleeNode = PDGHelper.getCrossFunctionNode(node, pdg, true);
+		else if (PDGHelper.isCallerNode(node, pdg))
+			calleeNode = PDGHelper.getCrossFunctionNode(node, pdg, false);
 		BoolExpr calleeNodePCVar = getOrAddVar(pdgNodeToZ3Var, calleeNode.getNodeId(), ctx);
 		constraints.add(ctx.MkEq(nodePCVar, calleeNodePCVar));
 		
 		// expression constraints
-		if (!isExprNode(node)) return;
+		if (!PDGHelper.isExprNode(node)) return;
 		
 		BoolExpr target = null;
-		if (isReturnNode(node, pdg))
+		if (PDGHelper.isReturnNode(node, pdg))
 			target = nodePCVar;
-		else if (isCallerNode(node, pdg))
+		else if (PDGHelper.isCallerNode(node, pdg))
 			target = calleeNodePCVar;
 		Expr nodeExprVar = Expression.getOrAddAnyVar(expNodeToZ3Var, node, ctx);
 		Expr calleeExprVar = Expression.getOrAddAnyVar(expNodeToZ3Var, calleeNode, ctx);
@@ -545,10 +70,10 @@ public class InterProcedure {
 										BoolExpr funcConstraint,
 										BoolExpr origEqExp, 
 										Context ctx) throws Z3Exception {
-		if (origEqExp != null && isExprNode(node)) {
+		if (origEqExp != null && PDGHelper.isExprNode(node)) {
 			origFuncConstraint = Z3Addons.removeConstraintContainingExp(origFuncConstraint, origEqExp, ctx);
 		}
-		if (origEqExp != null && !isExprNode(node)) {
+		if (origEqExp != null && !PDGHelper.isExprNode(node)) {
 			BoolExpr removedSubConstraint = 
 					Z3Addons.removeConstraintContainingExp(origFuncConstraint, origEqExp, ctx);
 			if (removedSubConstraint == null) {
@@ -587,7 +112,7 @@ public class InterProcedure {
 		}
 		
 		// find function name for this call
-		String functionName = getFunctionNameForCall(node, pdg);
+		String functionName = PDGHelper.getFunctionNameForCall(node, pdg);
 		
 		// later in the iteration, we may have run into a formal assignment when a 
 		// constraint was originally based on the exit PC - this is a more specific 
@@ -608,14 +133,14 @@ public class InterProcedure {
 		assert(!nodes.isEmpty());
 		
 		// obtain all call site labels
-		Set<Integer> labels = getAllSiteLabels(nodes, pdg);
+		Set<Integer> labels = PDGHelper.getAllSiteLabels(nodes, pdg);
 		
 		// assemble constraints
 		BoolExpr fullConstraint = null;
 		for (int labelId : labels) {
 			BoolExpr constraintPerLabel = null;
 			for (AbstractPDGNode node : nodes) {
-				AbstractPDGNode sourceLabel = getLabelPredecessor(node, pdg, labelId);
+				AbstractPDGNode sourceLabel = PDGHelper.getLabelPredecessor(node, pdg, labelId);
 				int nodeId = node.getNodeId();
 				int sourceId = sourceLabel.getNodeId();
 				// PC constraint
@@ -625,7 +150,7 @@ public class InterProcedure {
 				constraintPerLabel = Z3Addons.andConstraints(constraintPerLabel, ctx, pcConstraint);
 				
 				// Exp constraint
-				if (isExprNode(node)) {
+				if (PDGHelper.isExprNode(node)) {
 					System.out.println(node.getName() + " " + node.getJavaType());
 					System.out.println(sourceLabel.getName() + " " + sourceLabel.getJavaType());
 					Expr nodeExpVar = Expression.getOrAddAnyVar(expNodeToZ3Var, node, ctx);
@@ -646,21 +171,21 @@ public class InterProcedure {
 									Map<Integer, Expr> expNodeToZ3Var, 
 									Set<BoolExpr> constraints, 
 									Map<String, BoolExpr> funcToConstraint) throws Z3Exception {
-		if (isReturnNode(node, pdg)) {
-			Set<AbstractPDGNode> nodes = getFunctionCallNodes(node, pdg);
+		if (PDGHelper.isReturnNode(node, pdg)) {
+			Set<AbstractPDGNode> nodes = PDGHelper.getFunctionCallNodes(node, pdg);
 			Set<BoolExpr> newConstraints = new LinkedHashSet<>();
 			for (AbstractPDGNode cur : nodes) {
 				getFunctionConstraints(cur,  pdg, ctx, pdgNodeToZ3Var, expNodeToZ3Var, newConstraints);					
-				getNonFunctionConstraints(cur,  pdg, ctx, pdgNodeToZ3Var, expNodeToZ3Var, constraints);
+				IntraProcedure.getNonFunctionConstraints(cur,  pdg, ctx, pdgNodeToZ3Var, expNodeToZ3Var, constraints);
 			}
 			updateFuncConstraint(node, pdg, newConstraints, funcToConstraint, ctx, pdgNodeToZ3Var);
-		} else if (isEntryNode(node, pdg) && !isMainEntry(node, pdg) &&
+		} else if (PDGHelper.isEntryNode(node, pdg) && !PDGHelper.isMainEntry(node, pdg) &&
 						!funcToConstraint.containsKey(node.getProcedureName())) {
-			Set<AbstractPDGNode> nodes = getEntryNodes(node, pdg);
+			Set<AbstractPDGNode> nodes = PDGHelper.getEntryNodes(node, pdg);
 			getEntryNodeConstraints(nodes, pdg, ctx, pdgNodeToZ3Var, expNodeToZ3Var, constraints);
 		}
 		else {
-			getNonFunctionConstraints(node,  pdg, ctx, pdgNodeToZ3Var, expNodeToZ3Var, constraints);
+			IntraProcedure.getNonFunctionConstraints(node,  pdg, ctx, pdgNodeToZ3Var, expNodeToZ3Var, constraints);
 		}	
 	}
 	
@@ -678,23 +203,23 @@ public class InterProcedure {
 								Map<String, BoolExpr> funcToConstraint) {
 		if (debugMode) System.out.println();
 
-		if (isMainEntry(node, pdg)) return;
+		if (PDGHelper.isMainEntry(node, pdg)) return;
 		
 		// Only add entry node's parent if not in funcToConstraint
 		String functionName = node.getProcedureName();
-		if (isEntryNode(node, pdg) && funcToConstraint.containsKey(functionName))
+		if (PDGHelper.isEntryNode(node, pdg) && funcToConstraint.containsKey(functionName))
 			return;
 		
 		// If this node is part of a function call in the caller, all nodes involved with
 		// the call were processed at once. Don't add the other nodes within the caller
 		// involved with this function call. 
-		if (isReturnNode(node, pdg)) {
-			Set<AbstractPDGNode> nodes = getFunctionCallNodes(node, pdg);
+		if (PDGHelper.isReturnNode(node, pdg)) {
+			Set<AbstractPDGNode> nodes = PDGHelper.getFunctionCallNodes(node, pdg);
 			Set<AbstractPDGNode> predecessors = new HashSet<AbstractPDGNode>();
 			if (debugMode) System.out.println("Function call nodes:");
 			for (AbstractPDGNode funcCallNode : nodes) {
 				if (debugMode) System.out.println(funcCallNode.getName());
-				if (isMainEntry(funcCallNode, pdg)) continue;
+				if (PDGHelper.isMainEntry(funcCallNode, pdg)) continue;
 				for (PDGEdge edge : pdg.incomingEdgesOf(funcCallNode)) {
 					predecessors.add(edge.getSource());
 				}
@@ -747,7 +272,7 @@ public class InterProcedure {
 			AbstractPDGNode node = pdg.getNodeById(nextID);
 			System.out.println("Node being processed: " + node.getName() + " " + node.getJavaType());
 			
-			if (isMainEntry(node, pdg)) {
+			if (PDGHelper.isMainEntry(node, pdg)) {
 				// prune pc summary in MAIN, we don't need to go further back.
 				// this is for debugging, shouldn't be needed later
 				continue;

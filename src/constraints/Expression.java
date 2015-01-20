@@ -239,7 +239,7 @@ public class Expression {
 		
 		for (PDGEdge edge : pdg.incomingEdgesOf(node)) {
 			AbstractPDGNode source = edge.getSource();
-			if (InterProcedure.isExprNode(source)) {
+			if (PDGHelper.isExprNode(source)) {
 				Expr newVar = getOrAddAnyVar(expNodeToZ3Var, source, ctx);
 				expSourceNodes.add(newVar);
 			}
