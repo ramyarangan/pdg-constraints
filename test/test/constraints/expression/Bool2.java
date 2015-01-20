@@ -1,6 +1,6 @@
-package test.constraints.basic;
+package test.constraints.expression;
 
-public class BoolTest2 {
+public class Bool2 {
     public static void main(String[] args) {
         foo(true);
         foo(false);

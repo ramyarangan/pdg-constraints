@@ -19,12 +19,12 @@ public class Z3Addons {
 		return (BoolExpr) ctx.MkConst(freshVar,bool_type);
 	}
 	
-	public static BoolExpr getFreshIntVar(Context ctx) throws Z3Exception {
+	public static Expr getFreshIntVar(Context ctx) throws Z3Exception {
         Sort int_type = ctx.IntSort();
 
 		String freshVar = Integer.toString(freshVarCount);
 		freshVarCount++;
-		return (BoolExpr) ctx.MkConst(freshVar,int_type);
+		return ctx.MkConst(freshVar,int_type);
 	}
 	
 	

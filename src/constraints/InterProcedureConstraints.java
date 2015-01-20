@@ -27,20 +27,7 @@ import com.microsoft.z3.Z3Exception;
 
 public class InterProcedureConstraints {
 	private static final boolean debugMode = true;
-	
-	public static Expr getOrAddAnyVar(Map<Integer, Expr> mapToZ3Var, int id, Context ctx) 
-			throws Z3Exception {
-		Expr nodeVar = null;
-		if (mapToZ3Var.containsKey(id)) {
-			nodeVar = mapToZ3Var.get(id);
-		}
-		else {
-			nodeVar = Z3Addons.getFreshBoolVar(ctx);
-			mapToZ3Var.put(id, nodeVar);
-		}
-		return nodeVar;
-	}	
-	
+		
 	public static BoolExpr getOrAddVar(Map<Integer, BoolExpr> mapToZ3Var, int id, Context ctx) 
 				throws Z3Exception {
 		BoolExpr nodeVar = null;
@@ -64,6 +51,7 @@ public class InterProcedureConstraints {
 			case EXIT_SUMMARY:
 			case FORMAL_ASSIGNMENT:
 			case FORMAL_SUMMARY:
+			case ABSTRACT_LOCATION:
 				return true;
 			default:
 				return false;
@@ -72,6 +60,10 @@ public class InterProcedureConstraints {
 
 	public static boolean isPCNode(AbstractPDGNode node) {
 		return !isExprNode(node);
+	}
+	
+	public static boolean isPhiNode(AbstractPDGNode node) {
+		return (node.getName().indexOf("phi") == 0);
 	}
 	
 	public static boolean isReturnNode(AbstractPDGNode node, ProgramDependenceGraph pdg) {
@@ -306,14 +298,15 @@ public class InterProcedureConstraints {
 		AbstractPDGNode trueNode = getSourceNodeByType(edges,PDGEdgeType.TRUE);
 		if (trueNode != null) {
 			booleanNode = trueNode;
-			booleanNodeExp = (BoolExpr) getOrAddAnyVar(expNodeToZ3Var, trueNode.getNodeId(), ctx);
+			System.out.println(booleanNode.getName() + " " + booleanNode.getJavaType());
+			booleanNodeExp = (BoolExpr) ExpressionConstraints.getOrAddAnyVar(expNodeToZ3Var, trueNode, ctx);
 		}
 		
 		// false type
 		AbstractPDGNode falseNode = getSourceNodeByType(edges,PDGEdgeType.FALSE);
 		if (falseNode != null) {
 			booleanNode = falseNode;
-			booleanNodeExp = (BoolExpr) getOrAddAnyVar(expNodeToZ3Var, falseNode.getNodeId(), ctx);
+			booleanNodeExp = (BoolExpr) ExpressionConstraints.getOrAddAnyVar(expNodeToZ3Var, falseNode, ctx);
 			booleanNodeExp = ctx.MkNot(booleanNodeExp);
 		}	
 		
@@ -330,7 +323,9 @@ public class InterProcedureConstraints {
 		BoolExpr pcConstraint = null;
 		
 		AbstractPDGNode copyExplicitNode = getSourceNodeByType(edges,PDGEdgeType.COPY);
-		if (copyExplicitNode == null) getSourceNodeByType(edges,PDGEdgeType.EXP);
+		if (copyExplicitNode == null) {
+			copyExplicitNode = getSourceNodeByType(edges,PDGEdgeType.EXP);
+		}
 		if (copyExplicitNode != null) {
 			for (PDGEdge edge : edges) {
 				if ((edge.getType() == PDGEdgeType.COPY) || (edge.getType() == PDGEdgeType.EXP)) {
@@ -438,6 +433,43 @@ public class InterProcedureConstraints {
 		if (pcConstraint != null)
 			constraints.add(ctx.MkEq(nodeVar, pcConstraint));
 	}
+
+	public static void addPhiConstraint(BoolExpr expConstraint, AbstractPDGNode node, 
+			ProgramDependenceGraph pdg, Context ctx, 
+			Map<Integer, BoolExpr> pdgNodeToZ3Var, 
+			Map<Integer, Expr> expNodeToZ3Var, 
+			Set<BoolExpr> constraints) throws Z3Exception {
+		Expr[] args = expConstraint.Args();
+		AbstractPDGNode parent = null;
+		for (PDGEdge incoming : pdg.incomingEdgesOf(node)) {
+			Expr expVar = expNodeToZ3Var.get(incoming.getSource().getNodeId());
+			if (expVar.equals(args[0]) || expVar.equals(args[1])) {
+				parent = incoming.getSource();
+				break;
+			}
+		}
+		AbstractPDGNode pcParent = getSourceNodeByType(pdg.incomingEdgesOf(parent), 
+																PDGEdgeType.IMPLICIT);
+		BoolExpr pcParentVar = getOrAddVar(pdgNodeToZ3Var, pcParent.getNodeId(), ctx);
+		BoolExpr pcNodeVar = getOrAddVar(pdgNodeToZ3Var, node.getNodeId(), ctx);
+		BoolExpr parentVar = getOrAddVar(pdgNodeToZ3Var, parent.getNodeId(), ctx);
+		constraints.add(ctx.MkEq(ctx.MkAnd(new BoolExpr[]{expConstraint, pcNodeVar}), 
+														pcParentVar));
+		constraints.add(ctx.MkImplies(expConstraint, parentVar));
+	}
+	
+	public static void addPhiConstraints(BoolExpr expConstraint, AbstractPDGNode node, 
+							ProgramDependenceGraph pdg, Context ctx, 
+							Map<Integer, BoolExpr> pdgNodeToZ3Var, 
+							Map<Integer, Expr> expNodeToZ3Var, 
+							Set<BoolExpr> constraints) throws Z3Exception {
+		while (expConstraint.IsOr()) {
+			addPhiConstraint((BoolExpr) expConstraint.Args()[1], node, pdg, ctx, 
+										pdgNodeToZ3Var, expNodeToZ3Var, constraints);
+			expConstraint = (BoolExpr) expConstraint.Args()[0];
+		}
+		addPhiConstraint(expConstraint, node, pdg, ctx, pdgNodeToZ3Var, expNodeToZ3Var, constraints);
+	}
 	
 	public static void getExpressionConstraints(AbstractPDGNode node, 
 									ProgramDependenceGraph pdg, Context ctx, 
@@ -462,8 +494,11 @@ public class InterProcedureConstraints {
 		}
 		
 		BoolExpr nodeVar = getOrAddVar(pdgNodeToZ3Var, node.getNodeId(), ctx);
-		if (expConstraint != null)
+		if (expConstraint != null) {
 			constraints.add(ctx.MkImplies(nodeVar, expConstraint));
+			if (isPhiNode(node)) addPhiConstraints(expConstraint, node, pdg, ctx, pdgNodeToZ3Var, 
+											expNodeToZ3Var, constraints);
+		}
 	}
 
 	public static void getNonFunctionConstraints(AbstractPDGNode node, ProgramDependenceGraph pdg,
@@ -498,8 +533,8 @@ public class InterProcedureConstraints {
 			target = nodePCVar;
 		else if (isCallerNode(node, pdg))
 			target = calleeNodePCVar;
-		Expr nodeExprVar = getOrAddAnyVar(expNodeToZ3Var, node.getNodeId(), ctx);
-		Expr calleeExprVar = getOrAddAnyVar(expNodeToZ3Var, calleeNode.getNodeId(), ctx);
+		Expr nodeExprVar = ExpressionConstraints.getOrAddAnyVar(expNodeToZ3Var, node, ctx);
+		Expr calleeExprVar = ExpressionConstraints.getOrAddAnyVar(expNodeToZ3Var, calleeNode, ctx);
 
 		constraints.add(ctx.MkImplies(target, ctx.MkEq(nodeExprVar, calleeExprVar)));
 	}
@@ -590,8 +625,10 @@ public class InterProcedureConstraints {
 				
 				// Exp constraint
 				if (isExprNode(node)) {
-					Expr nodeExpVar = getOrAddAnyVar(expNodeToZ3Var, nodeId, ctx);
-					Expr sourceLabelExpVar = getOrAddAnyVar(expNodeToZ3Var, sourceId, ctx);
+					System.out.println(node.getName() + " " + node.getJavaType());
+					System.out.println(sourceLabel.getName() + " " + sourceLabel.getJavaType());
+					Expr nodeExpVar = ExpressionConstraints.getOrAddAnyVar(expNodeToZ3Var, node, ctx);
+					Expr sourceLabelExpVar = ExpressionConstraints.getOrAddAnyVar(expNodeToZ3Var, sourceLabel, ctx);
 					BoolExpr expConstraint = ctx.MkImplies(nodePCVar, 
 												ctx.MkEq(nodeExpVar, sourceLabelExpVar));
 					constraintPerLabel = Z3Addons.andConstraints(constraintPerLabel, ctx, expConstraint);	
@@ -707,7 +744,7 @@ public class InterProcedureConstraints {
 		while (!workQueue.isEmpty()) {
 			Integer nextID = workQueue.remove();
 			AbstractPDGNode node = pdg.getNodeById(nextID);
-			System.out.println("Node being processed: " + node.getName());
+			System.out.println("Node being processed: " + node.getName() + " " + node.getJavaType());
 			
 			if (isMainEntry(node, pdg)) {
 				// prune pc summary in MAIN, we don't need to go further back.
@@ -766,7 +803,7 @@ public class InterProcedureConstraints {
 	public static void printGraphInfo(ProgramDependenceGraph pdg) {
 		Set<AbstractPDGNode> nodes = pdg.vertexSet();
 		for (AbstractPDGNode node : nodes) {
-			System.out.println(node.getName() + " " + node.getNodeType() + " " + node.getNodeId());
+			System.out.println(node.getName() + " " + node.getNodeType() + " " + node.getJavaType() + " " + node.getNodeId());
 		}
 	}
 	
